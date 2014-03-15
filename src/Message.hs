@@ -3,10 +3,19 @@ module Message (
   Message(..)
   ) where
 
+import Control.Applicative ( (<$>) )
 import Data.Binary
+import Data.Binary.IEEE754
+import Data.Binary.Put ( putLazyByteString, runPut )
+import qualified Data.ByteString.Lazy as BSL
+
+import Debug.Trace
+
+import Types
 
 data Message
-     = Ping
+     = Hello NodeInfo
+     | Ping
      deriving ( Show )
 {-
   Everything is big-endian.
@@ -19,13 +28,23 @@ data Message
 putHeader :: Word8 -> Word32 -> Put
 putHeader t s = put t >> put s
 
+putPut :: (Binary a) => Word8 -> a -> Put
+putPut t p
+  | len > 10000 = error "too large message for putPut"
+  | otherwise = putHeader t (fromIntegral len) >> putLazyByteString bs
+  where
+    bs = encode p
+    len = BSL.length bs
+
 instance Binary Message where
-  put Ping = putHeader 0 0
+  put (Hello ni) = putPut 1 (ni)
+  put Ping = putHeader 2 0
 
   get = do
     t <- get :: Get Word8
     s <- get :: Get Word32
     
-    case t of
-      0 -> return Ping
+    traceShow t $ case t of
+      1 -> Hello <$> get
+      2 -> return Ping
       _ -> fail $ "unknown message type " ++ show t

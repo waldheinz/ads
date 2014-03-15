@@ -14,14 +14,17 @@ cabal-version:       >=1.10
 
 executable ads
   main-is:             Main.hs
+  ghc-options:         -Wall
   -- other-modules:       
   -- other-extensions:    
   build-depends:
     base            >=4.6 && <4.7,
     binary          >= 0.5,
     binary-conduit  >= 1.2,
+    bytestring      >= 0.10,
     conduit         >= 1.0,
     configurator    >= 0.2,
+    data-binary-ieee754 >= 0.4,
     network         >= 2.4,
     network-conduit >= 1.0,
     stm             >= 2.4,
