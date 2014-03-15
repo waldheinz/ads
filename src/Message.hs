@@ -6,8 +6,6 @@ module Message (
 import Control.Applicative ( (<$>) )
 import Data.Binary
 
-import Debug.Trace
-
 import Types
 
 data Message
@@ -19,7 +17,6 @@ data Message
 
   The basic message header is:
     * 1 byte for the message type
-    * 1 uint32 for the remaining message payload length, excluding the header
 -}
 
 putHeader :: Word8 -> Put
@@ -40,7 +37,7 @@ instance Binary Message where
   get = do
     t <- get :: Get Word8
     
-    traceShow t $ case t of
+    case t of
       1 -> Hello <$> get
       2 -> return Ping
       _ -> fail $ "unknown message type " ++ show t

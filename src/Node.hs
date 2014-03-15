@@ -50,8 +50,6 @@ runNode src sink mni connected = do
   case mni of
     Nothing -> return ()
     Just ni -> atomically $ writeTBMQueue mq (MSG.Hello ni)
-  
-  print mni
 
   void $ forkIO $ src C.$$ C.conduitDecode C.=$ (C.mapM_ $ \msg -> do
     case msg of
