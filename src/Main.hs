@@ -13,7 +13,8 @@ import Peers as P
 main :: IO ()
 main = withSocketsDo $ do
   let
-    s = serverSettings 1234 HostAny
+    s =  -- serverAfterBind (\s -> print s) $ 
+      serverSettings 1234 HostAny
     ni = NodeInfo 0.5
 
   print ("ni", (decode . encode $ ni) :: NodeInfo)
@@ -31,5 +32,4 @@ main = withSocketsDo $ do
   forkIO $ N.connectNode ni ("127.0.0.1", 1234) $ \n -> do
     print n
 
-
-  threadDelay (1000 * 1000 * 10)
+  threadDelay (1000 * 1000 * 100)

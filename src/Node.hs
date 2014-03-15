@@ -9,9 +9,10 @@ module Node (
   runNode
   ) where
 
-import Control.Concurrent ( myThreadId, ThreadId )
+import Control.Concurrent ( forkIO, myThreadId, ThreadId )
 import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
+import Control.Monad ( void )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.Conduit as C
@@ -36,7 +37,7 @@ instance Show (Node) where
 -- Handshake
 ------------------------------------------------------------------------------
 
--- ^ handle a node that connected to us
+-- ^ handle a node that is currently connected to us
 runNode
   :: C.Source IO BS.ByteString
   -> C.Sink BS.ByteString IO ()
@@ -52,7 +53,7 @@ runNode src sink mni connected = do
   
   print mni
 
-  src C.$$ C.conduitDecode C.=$ (C.mapM_ $ \msg -> do
+  void $ forkIO $ src C.$$ C.conduitDecode C.=$ (C.mapM_ $ \msg -> do
     case msg of
       MSG.Hello ni -> do
         print $ "got a NI: " ++ show ni
