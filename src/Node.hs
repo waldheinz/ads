@@ -3,7 +3,7 @@ module Node (
   -- * static Node information
   NodeInfo(..),
   
-  Node, connectNode,
+  Node, connectNode, enqMessage,
   
   -- * incoming / outgoig messages
   runNode
@@ -28,11 +28,16 @@ data Node
   = Node
     { nInfo    :: NodeInfo
     , _nThread :: ThreadId
+    , nQueue   :: STM.TBMQueue Message -- ^ outgoing message queue
     }
 
 instance Show (Node) where
   show n = "Node {ni = " ++ show (nInfo n) ++ " }"
-                       
+   
+-- | puts a message on the Node's outgoing message queue       
+enqMessage :: Node -> MSG.Message -> STM ()
+enqMessage n m = writeTBMQueue (nQueue n) m
+
 ------------------------------------------------------------------------------
 -- Handshake
 ------------------------------------------------------------------------------
@@ -56,7 +61,7 @@ runNode src sink mni connected = do
       MSG.Hello ni -> do
         print $ "got a NI: " ++ show ni
         t <- myThreadId
-        connected $ Node ni t
+        connected $ Node ni t mq
       x -> print x
                                 )
   C.sourceTBMQueue mq C.$= C.conduitEncode C.$$ sink

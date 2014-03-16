@@ -14,18 +14,22 @@ import Control.Concurrent.STM
 import Control.Monad ( void )
 import Data.Conduit.Network
 
+import Logging
+import qualified Message as MSG
 import Node as N
 import Peers as P
 
-nodeListen :: CFG.Config -> P.Peers -> IO ()
-nodeListen cfg p = do
+nodeListen :: CFG.Config -> NodeInfo -> P.Peers -> IO ()
+nodeListen cfg ni p = do
   host <- CFG.require cfg "host"
   port <- CFG.require cfg "port"
 
   let
-    s = serverSettings port ( fromString host)
+    s = serverSettings port (fromString host)
   void $ forkIO $ runTCPServer s $ \ad -> do
-      print $ ("client connected", appSockAddr ad)
-      N.runNode (appSource ad) (appSink ad) Nothing $ \n -> do
-        print n
-        atomically $ P.addPeer p n
+    infoM "net" $ "incoming connection from " ++ (show $ appSockAddr ad)
+    N.runNode (appSource ad) (appSink ad) Nothing $ \n -> do
+      atomically $ P.addPeer p n >> N.enqMessage n (MSG.Hello ni)
+      infoM "net" $ "added peer " ++ show n
+
+  infoM "net" $ "Node listening on " ++ host ++ ":" ++ show port
