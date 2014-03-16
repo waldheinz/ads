@@ -1,7 +1,9 @@
 
+{-# LANGUAGE OverloadedStrings #-}
+
 module Node (
   -- * static Node information
-  NodeInfo(..),
+  getNodeInfo,
   
   Node, connectNode, enqMessage,
   
@@ -14,15 +16,30 @@ import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
 import Control.Monad ( void )
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base16 as HEX
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Network as C
 import qualified Data.Conduit.List as C
 import qualified Data.Conduit.Serialization.Binary as C
 import qualified Data.Conduit.TQueue as C
+import qualified Data.Configurator as CFG
+import qualified Data.Configurator.Types as CFG
 
 import Message as MSG
 import Types
+
+-------------------------------------------------------------------------
+-- NodeInfo related
+-------------------------------------------------------------------------
+
+-- | extracts our identity from the config
+getNodeInfo :: CFG.Config -> IO NodeInfo
+getNodeInfo cfg = do
+  nid <- CFG.require cfg "id"
+  let (nid', rest) = HEX.decode nid
+
+  return $! NodeInfo nid'
 
 data Node
   = Node
@@ -33,7 +50,7 @@ data Node
 
 instance Show (Node) where
   show n = "Node {ni = " ++ show (nInfo n) ++ " }"
-   
+  
 -- | puts a message on the Node's outgoing message queue       
 enqMessage :: Node -> MSG.Message -> STM ()
 enqMessage n m = writeTBMQueue (nQueue n) m
@@ -73,5 +90,4 @@ connectNode
   -> IO ()
 connectNode ni (host, port) connected =
   C.runTCPClient (C.clientSettings port $ BSC.pack host) $ \ad -> do
-    print $ ("connected to server", C.appSockAddr ad)
     runNode (C.appSource ad) (C.appSink ad) (Just ni) connected

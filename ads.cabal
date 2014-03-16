@@ -19,12 +19,12 @@ executable ads
   -- other-extensions:    
   build-depends:
     base                >=4.6 && <4.7,
+    base16-bytestring   >= 0.1,
     binary              >= 0.5,
     binary-conduit      >= 1.2,
     bytestring          >= 0.10,
     conduit             >= 1.0,
     configurator        >= 0.2,
-    data-binary-ieee754 >= 0.4,
     hslogger            >= 1.2,
     network             >= 2.4,
     network-conduit     >= 1.0,

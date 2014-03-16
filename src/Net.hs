@@ -18,6 +18,7 @@ import Logging
 import qualified Message as MSG
 import Node as N
 import Peers as P
+import Types
 
 nodeListen :: CFG.Config -> NodeInfo -> P.Peers -> IO ()
 nodeListen cfg ni p = do

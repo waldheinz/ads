@@ -21,8 +21,7 @@ main = withSocketsDo $ do
   LOG.initLogging $ CFG.subconfig "logging" cfg
   infoM "main" "Starting up..."
 
-  let
-    ni = NodeInfo 0.5
+  ni <- getNodeInfo (CFG.subconfig "node" cfg)
 
   p <- atomically mkPeers
 
