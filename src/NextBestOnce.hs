@@ -2,7 +2,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module NextBestOnce (
-  Node(..), route
+  Location, Message, Node(..), route
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -12,10 +12,17 @@ import Control.Concurrent.STM
 class (Eq i) => Location i where
   distance :: i -> i -> Double -- ^ distance between two locations in [0..1)
 
+instance Location Int where
+  distance l1 l2 = (fromIntegral $ abs (l1 - l2)) / (fromIntegral (minBound :: Int) - fromIntegral (maxBound :: Int))
+
 class (Location l) => Message m l where
   marked :: m -> l -> Bool     -- ^ already visited the specified location?
   mark   :: m -> l -> m        -- ^ mark the location as visited and get updated message
   target :: m -> l             -- ^ where should this message go?
+
+instance Message ([Int]) Int where
+  --target (t, _) = t
+  
 
 data Node m l = Node
                 { location   :: l
