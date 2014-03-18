@@ -10,6 +10,7 @@ import qualified Data.Configurator.Types as CFG
 
 import qualified Freenet.Keys as FK
 import qualified Freenet.Store as FS
+import qualified Freenet.URI as FU
 
 data Freenet = FN
                { fnChkStore :: FS.FileStore FK.CHK

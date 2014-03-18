@@ -10,8 +10,6 @@ import qualified Data.ByteString as BS
 
 import Types
 
-
-
 newtype CHK = CHK BS.ByteString
 
 chkPayloadSize :: Int
