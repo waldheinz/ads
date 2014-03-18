@@ -1,6 +1,6 @@
 
 module Types (
-  NodeInfo(..)
+  NodeInfo(..), Block(..)
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -19,3 +19,8 @@ instance Show NodeInfo where
 instance Binary NodeInfo where
   put ni = put $ nodeId ni
   get = NodeInfo <$> get
+
+-- | binary data of fixed size
+class Binary a => Block a where
+  size :: a -> Int
+  

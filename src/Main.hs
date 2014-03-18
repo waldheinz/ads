@@ -9,6 +9,7 @@ import Control.Monad ( void )
 import qualified Data.Configurator as CFG
 import Network ( withSocketsDo )
 
+import Freenet as FN
 import Logging as LOG
 import Net
 import Node as N
@@ -20,11 +21,11 @@ main = withSocketsDo $ do
 
   LOG.initLogging $ CFG.subconfig "logging" cfg
   infoM "main" "Starting up..."
-
+  
   ni <- getNodeInfo (CFG.subconfig "node" cfg)
-
   p <- atomically mkPeers
-
+  fn <- FN.initFn (CFG.subconfig "freenet" cfg)
+  
   nodeListen (CFG.subconfig "node.listen" cfg) ni p
   
   void $ forkIO $ N.connectNode ni ("127.0.0.1", 1234) $ \n -> do
