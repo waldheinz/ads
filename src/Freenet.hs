@@ -6,6 +6,7 @@ module Freenet (
   ) where
 
 import Control.Concurrent.STM
+import qualified Data.ByteString as BS
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import qualified Data.HashMap.Strict as Map
@@ -71,16 +72,17 @@ waitDataFound fn key = do
   
 handleRequest :: Freenet -> DataRequest -> IO ()
 handleRequest fn dr = do
-  
-  return ()
-
-fetchUri :: Freenet -> FU.URI -> IO (Either T.Text DataFound)
-fetchUri fn uri = do
-  let dr = FU.toDataRequest uri
-
   case fnCompanion fn of
     Nothing -> return ()
     Just c  -> FC.getData c dr
 
-  waitDataFound fn (FU.uriLocation uri) 
+fetchUri :: Freenet -> FU.URI -> IO (Either T.Text BS.ByteString)
+fetchUri fn uri = do
+  let dr = FU.toDataRequest uri
+  handleRequest fn dr
+  df <- waitDataFound fn (FU.uriLocation uri)
+  
+  return $ case df of
+    Left e  -> Left e
+    Right d -> Right $ FK.decryptDataFound (FU.chkKey uri) d
   

@@ -24,6 +24,7 @@ executable ads
     binary               >= 0.5,
     binary-conduit       >= 1.2,
     bytestring           >= 0.10,
+    cipher-aes           >= 0.2,
     conduit              >= 1.0,
     configurator         >= 0.2,
     hashable             >= 1.2,

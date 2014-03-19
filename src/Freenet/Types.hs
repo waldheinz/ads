@@ -10,6 +10,7 @@ module Freenet.Types (
 import Control.Concurrent.STM
 import qualified Data.ByteString as BS
 import Data.Hashable
+import Text.Printf ( printf )
 import qualified Data.Text as T
 import Data.Word ( Word8 )
 
@@ -34,6 +35,8 @@ data DataRequest
 
 data DataFound
    = ChkFound Key BS.ByteString BS.ByteString -- location, headers, data
-   deriving ( Show )
+   
+instance Show DataFound where
+  show (ChkFound k h d) = "ChkFound {k=" ++ (show k) ++ ", h=" ++ ((concatMap (printf "%02x") . BS.unpack) h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
 
 type DataHandler = DataFound -> STM ()
