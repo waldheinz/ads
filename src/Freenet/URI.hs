@@ -2,31 +2,25 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet.URI (
-  URI, parseURI
+  URI(..), parseUri, toDataRequest, uriLocation
   ) where
 
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
   
 import Freenet.Base64
-  
-newtype Key = Key BS.ByteString deriving ( Show )
-                                         
-mkKey :: BS.ByteString -> Either T.Text Key
-mkKey bs = if BS.length bs == 32
-           then Right $ Key bs
-           else Left  $ "keys must be 32 bytes"
+import Freenet.Types  
 
 data URI
      = CHK
-       { chkLocation :: Key -- ^ the routing key
-       , chkKey      :: Key -- ^ the crypto key
+       { chkLocation :: Key           -- ^ the routing key
+       , chkKey      :: Key           -- ^ the crypto key
        , chkExtra    :: BS.ByteString -- ^ extra data about algorithms used, always 5 bytes
        }
      deriving ( Show )
 
-parseURI :: T.Text -> Either T.Text URI
-parseURI str = case T.take 4 str of
+parseUri :: T.Text -> Either T.Text URI
+parseUri str = case T.take 4 str of
   "CHK@" -> parseChk (T.drop 4 str)
   _      -> Left $ T.concat ["cannot recognize URI type of \"", str, "\""]
 
@@ -41,3 +35,8 @@ parseChk str = case T.split (== ',') str of
     return $ CHK rk ck e
   _ -> Left $ T.concat $ ["expected 3 comma-separated parts in \"", str, "\""]
   
+toDataRequest :: URI -> DataRequest
+toDataRequest (CHK loc _ e) = ChkRequest loc $ BS.index e 1
+
+uriLocation :: URI -> Key
+uriLocation (CHK loc _ _) = loc

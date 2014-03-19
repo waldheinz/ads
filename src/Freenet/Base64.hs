@@ -23,7 +23,7 @@ toStandardAlphabet = B.map toStd
 fromBase64' :: T.Text -> Either T.Text B.ByteString
 fromBase64' s = case dec of
   Left e   -> Left $ T.pack e
-  Right bs -> Right bs
+  Right b -> Right b
   where
     dec = decode $ toStandardAlphabet bs
     bs = BL.toStrict $ BL.concat
@@ -33,7 +33,9 @@ fromBase64' s = case dec of
     pad
       | T.length s `rem` 4 == 0 = 0
       | otherwise = fromIntegral $ 4 - (T.length s `rem` 4)
-  
+
+-- | convert bs to modified base64
+-- TODO: this actually produces standards-conformant base64, but freenet
+-- accepts this as well almost everywhere, so this is good for now
 toBase64' :: B.ByteString -> T.Text
 toBase64' b = T.pack $ map (toEnum . fromEnum) $ B.unpack $ encode b
-
