@@ -84,5 +84,5 @@ fetchUri fn uri = do
   
   return $ case df of
     Left e  -> Left e
-    Right d -> Right $ FK.decryptDataFound (FU.chkKey uri) d
+    Right d -> FK.decryptDataFound (FU.chkKey uri) d
   

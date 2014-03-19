@@ -31,6 +31,7 @@ executable ads
     hslogger             >= 1.2,
     network              >= 2.4,
     network-conduit      >= 1.0,
+    SHA                  >= 1.6,
     stm                  >= 2.4,
     stm-chans            >= 3.0,
     stm-conduit          >= 2.2,
