@@ -19,7 +19,7 @@ import Freenet.Types
 import qualified Freenet.URI as FU
 
 data Freenet = FN
-               { fnChkStore  :: FS.FileStore FK.CHK
+               { fnChkStore  :: FS.FileStore FK.CHK'
                , fnCompanion :: Maybe FC.Companion
                , fnRequests  :: TVar (Map.HashMap Key [DataHandler])
                }
@@ -82,7 +82,12 @@ fetchUri fn uri = do
   handleRequest fn dr
   df <- waitDataFound fn (FU.uriLocation uri)
   
-  return $ case df of
-    Left e  -> Left e
-    Right d -> FK.decryptDataFound (FU.chkKey uri) d
+  case df of
+    Left e  -> return $ Left e
+    Right d -> do
+      case FK.decryptDataFound (FU.chkKey uri) d of
+        Left decError -> return $ Left decError
+        Right plain   -> case FK.parseMetadata plain of
+          Left e   -> return $ Left e
+          Right md -> print md >> return (Right plain)
   

@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet.Types (
-  Key(..), mkKey,
+  Key(..), mkKey, mkKey',
 
   DataRequest(..), DataFound(..), DataHandler
   ) where
@@ -28,6 +28,11 @@ mkKey :: BS.ByteString -> Either T.Text Key
 mkKey bs = if BS.length bs == 32
            then Right $ Key bs
            else Left  $ "keys must be 32 bytes"
+
+mkKey' :: BS.ByteString -> Key
+mkKey' bs
+  | BS.length bs == 32 = Key bs
+  | otherwise          = error "expected 32 bytes in mkKey"
 
 data DataRequest
    = ChkRequest Key Word8 -- ^ the location and the hash algorithm so it can be verified

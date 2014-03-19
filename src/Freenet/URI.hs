@@ -2,11 +2,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet.URI (
-  URI(..), parseUri, toDataRequest, uriLocation
+  URI(..), parseUri, toDataRequest, uriLocation, mkChkExtra
   ) where
 
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy.Builder as BSB
+import Data.Monoid
 import qualified Data.Text as T
+import Data.Word
   
 import Freenet.Base64
 import Freenet.Types  
@@ -40,3 +44,16 @@ toDataRequest (CHK loc _ e) = ChkRequest loc $ BS.index e 1
 
 uriLocation :: URI -> Key
 uriLocation (CHK loc _ _) = loc
+
+
+-- | construct CHK extra data
+mkChkExtra
+  :: Word8         -- ^ crypto algorithm
+  -> Word16        -- ^ comptression algorithm
+  -> Bool          -- ^ control document
+  -> BS.ByteString -- ^ resulting 5 bytes of CHK key "extra" data
+mkChkExtra crypt compr contr = BSL.toStrict $
+  BSB.toLazyByteString $ BSB.word8 0 <> BSB.word8 crypt <> BSB.word8 ctrl <> BSB.word16BE compr 
+  where
+    ctrl = if contr then 2 else 1
+    
