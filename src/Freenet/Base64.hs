@@ -17,6 +17,12 @@ toStd x
    | x == (toEnum $ fromEnum '-') = toEnum $ fromEnum '/'
    | otherwise = x
 
+fromStd :: Char -> Char
+fromStd x
+   | x == '+' = '~'
+   | x == '/' = '-'
+   | otherwise = x
+
 toStandardAlphabet :: B.ByteString -> B.ByteString
 toStandardAlphabet = B.map toStd
 
@@ -34,8 +40,7 @@ fromBase64' s = case dec of
       | T.length s `rem` 4 == 0 = 0
       | otherwise = fromIntegral $ 4 - (T.length s `rem` 4)
 
--- | convert bs to modified base64
--- TODO: this actually produces standards-conformant base64, but freenet
--- accepts this as well almost everywhere, so this is good for now
+-- | convert bytes to Freenet's modified base64
 toBase64' :: B.ByteString -> T.Text
-toBase64' b = T.pack $ map (toEnum . fromEnum) $ B.unpack $ encode b
+toBase64' b = T.takeWhile (/= '=') $
+  T.map fromStd $ T.pack $ map (toEnum . fromEnum) $ B.unpack $ encode b
