@@ -30,7 +30,7 @@ main = withSocketsDo $ do
   void $ forkIO $ N.connectNode ni ("127.0.0.1", 1234) $ \n -> do
     print n
   -}
-  let uri = "CHK@~w55O-t1dGB53Y1rW237iFTXhRfl5MBg-MoO7nkpZEY,J-hoxYog~8DrNoRCVDTfYo9g8tGooGdoBxtyjeJte-c,AAMC--8"
+  let uri = "CHK@~w55O-t1dGB53Y1rW237iFTXhRfl5MBg-MoO7nkpZEY,J-hoxYog~8DrNoRCVDTfYo9g8tGooGdoBxtyjeJte-e,AAMC--8"
 
   d <- case FU.parseUri uri of
     Left e -> error $ show e

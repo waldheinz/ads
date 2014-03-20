@@ -65,7 +65,7 @@ mkChkExtra
 mkChkExtra crypt compr contr = ChkExtra $ BSL.toStrict $
   BSB.toLazyByteString $ BSB.word8 0 <> BSB.word8 crypt <> BSB.word8 ctrl <> BSB.word16BE compr 
   where
-    ctrl = if contr then 2 else 1
+    ctrl = if contr then 2 else 0
 
 -- | extract the crypto algorithm used from an ChkExtra
 chkExtraCrypto :: ChkExtra -> Word8

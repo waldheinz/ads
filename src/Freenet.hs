@@ -7,11 +7,14 @@ module Freenet (
 
 import Control.Concurrent.STM
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
+import Data.Digest.Pure.SHA
 import qualified Data.HashMap.Strict as Map
 import qualified Data.Text as T
 
+import Freenet.Base64
 import qualified Freenet.Companion as FC
 import qualified Freenet.Keys as FK
 import qualified Freenet.Store as FS
@@ -84,7 +87,11 @@ fetchUri fn uri = do
   
   case df of
     Left e  -> return $ Left e
-    Right d -> do
+    Right d@(ChkFound k hdr da) -> do
+      print ("key", k)
+      print ("headers", toBase64' hdr)
+      print ("hash", showDigest $ sha256 $ BSL.fromStrict da)
+      
       case FK.decryptDataFound (FU.chkKey uri) d of
         Left decError -> return $ Left decError
         Right plain   -> case FK.parseMetadata plain of
