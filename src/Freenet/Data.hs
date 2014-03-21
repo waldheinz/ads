@@ -2,7 +2,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet.Data (
-  CHK', decryptDataFound,
   
   -- * CHKs
   ChkHeader, mkChkHeader, unChkHeader,
@@ -10,10 +9,12 @@ module Freenet.Data (
 
   -- * Successfully retrieved data
   DataFound, mkChkFound, dataFoundLocation,
-
+  decryptDataFound, -- dataFoundPayload,
+  
   DataHandler
   ) where
 
+import Control.Applicative ( (<$>), (<*>) )
 import Control.Monad.STM
 import Crypto.Cipher.AES
 import Data.Binary
@@ -27,31 +28,23 @@ import qualified Data.Text as T
 
 import Freenet.Base64
 import Freenet.Types
-import Types
-
-newtype CHK' = CHK' BS.ByteString
-
-chkPayloadSize :: Int
-chkPayloadSize = 32 * 1024
-
-instance Binary CHK' where
-  put (CHK' p) = putByteString p
-  get = fmap CHK' (getByteString chkPayloadSize)
-
-instance Block CHK' where
-  size _ = chkPayloadSize
-
-
 
 -- | the header required to verify a CHK data block
-newtype ChkHeader = ChkHeader { unChkHeader :: BS.ByteString }
+newtype ChkHeader = ChkHeader { unChkHeader :: BS.ByteString } deriving ( Eq )
+
+chkHeaderSize :: Int
+chkHeaderSize = 36
 
 instance Show ChkHeader where
   show (ChkHeader bs) = T.unpack $ toBase64' bs
 
+instance Binary ChkHeader where
+  put (ChkHeader h) = putByteString h
+  get = ChkHeader <$> getByteString chkHeaderSize
+
 mkChkHeader :: BS.ByteString -> Either T.Text ChkHeader
 mkChkHeader bs
-  | BS.length bs == 36 = Right $ ChkHeader bs
+  | BS.length bs == chkHeaderSize = Right $ ChkHeader bs
   | otherwise = Left $ "CHK header length must be 36 bytes"
 
 chkHeaderHash :: ChkHeader -> BS.ByteString
@@ -61,14 +54,31 @@ chkHeaderCipherLen :: ChkHeader -> BS.ByteString
 chkHeaderCipherLen = BS.drop 34 . unChkHeader
 
 data DataFound
-   = ChkFound !Key !ChkHeader !BS.ByteString -- location, headers, data
+   = ChkFound !Key !ChkHeader !BS.ByteString -- headers and data
+   deriving ( Eq )
+            
+instance Binary DataFound where
+  put (ChkFound k h d) = put (1 :: Word8) >> put k >> put h >> putByteString d
 
--- | extract the routing key from a DataFound
+  get = do
+    t <- get :: Get Word8
+    case t of
+      1 -> do
+        (k, h, d) <- (,,) <$> get <*> get <*> getByteString 32768
+        case mkChkFound k h d of
+          Right df -> return df
+          Left e   -> fail $ T.unpack e
+      _ -> fail $ "unknown type " ++ show t
+
+--dataFoundPayload :: DataFound -> BSL.ByteString
+--dataFoundPayload (ChkFound _ h d) = (encode h) `BSL.append` (BSL.fromStrict d)
+
+-- | find the routing key for a DataFound
 dataFoundLocation :: DataFound -> Key
-dataFoundLocation (ChkFound l _ _) = l
+dataFoundLocation (ChkFound k _ _) = k -- mkKey' $ BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
      
 instance Show DataFound where
-  show (ChkFound k h d) = "ChkFound {k=" ++ (show k) ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
+  show (ChkFound k h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
 
 mkChkFound :: Key -> ChkHeader -> BS.ByteString -> Either T.Text DataFound
 mkChkFound k h d
@@ -76,7 +86,7 @@ mkChkFound k h d
   | otherwise = Left "hash mismatch"
   where
     hash = bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
-           
+
 -- |
 -- given the secret crypto key (second part of URIs), an data found can be
 -- decrypted to get the source data back

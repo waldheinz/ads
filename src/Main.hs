@@ -4,6 +4,7 @@
 module Main ( main ) where
 
 import Control.Concurrent.STM
+import Control.Monad ( void )
 import qualified Data.Configurator as CFG
 import Network ( withSocketsDo )
 
@@ -32,8 +33,6 @@ main = withSocketsDo $ do
   -}
   let uri = "CHK@~w55O-t1dGB53Y1rW237iFTXhRfl5MBg-MoO7nkpZEY,J-hoxYog~8DrNoRCVDTfYo9g8tGooGdoBxtyjeJte-c,AAMC--8"
 
-  d <- case FU.parseUri uri of
+  case FU.parseUri uri of
     Left e -> error $ show e
-    Right u -> FN.fetchUri fn u
-
-  print d
+    Right u -> void $ FN.fetchUri fn u

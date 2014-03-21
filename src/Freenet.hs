@@ -20,7 +20,7 @@ import Freenet.Types
 import qualified Freenet.URI as FU
 
 data Freenet = FN
-               { fnChkStore  :: FS.FileStore FD.CHK'
+               { fnStore  :: FS.FileStore
                , fnCompanion :: Maybe FC.Companion
                , fnRequests  :: TVar (Map.HashMap Key [FD.DataHandler])
                }
@@ -30,7 +30,7 @@ initFn :: CFG.Config -> IO Freenet
 initFn cfg = do
   -- datastore
   dsdir <- CFG.require cfg "datastore"
-  chkStore <- FS.mkFileStore undefined 1024 (dsdir ++ "/chkstore" )
+  chkStore <- FS.mkFileStore 1024 dsdir
   reqs <- newTVarIO Map.empty
   
   let fn = FN chkStore Nothing reqs
@@ -46,6 +46,10 @@ initFn cfg = do
 
 offer :: Freenet -> FD.DataHandler
 offer fn df = do
+  -- maybe write to our store
+  FS.putData (fnStore fn) df
+
+  -- inform other registered handlers
   m <- readTVar (fnRequests fn)
   mapM_ (\h -> h df) $ Map.lookupDefault [] key m
   modifyTVar (fnRequests fn) (Map.delete key)
@@ -62,7 +66,7 @@ waitDataFound fn key = do
   
   df <- atomically $ do
     dfc <- newEmptyTMVar
-    addHandler fn key (putTMVar dfc)
+    addHandler fn key $ putTMVar dfc
     return dfc
 
   atomically $ do
@@ -92,5 +96,5 @@ fetchUri fn uri = do
         Left decError -> return $ Left decError
         Right plain   -> case MD.parseMetadata plain of
           Left e   -> return $ Left e
-          Right md -> print md >> return (Right plain)
+          Right md -> return (Right plain)
   
