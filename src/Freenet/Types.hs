@@ -8,7 +8,9 @@ module Freenet.Types (
   ChkHeader, mkChkHeader, unChkHeader,
   chkHeaderHash, chkHeaderCipherLen,
   
-  DataRequest(..), DataFound(..), DataHandler
+  DataRequest(..),
+  DataFound(..),
+  DataHandler
   ) where
 
 import Control.Concurrent.STM

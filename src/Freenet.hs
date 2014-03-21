@@ -17,6 +17,7 @@ import qualified Data.Text as T
 import Freenet.Base64
 import qualified Freenet.Companion as FC
 import qualified Freenet.Keys as FK
+import qualified Freenet.Metadata as MD
 import qualified Freenet.Store as FS
 import Freenet.Types
 import qualified Freenet.URI as FU
@@ -94,7 +95,7 @@ fetchUri fn uri = do
       
       case FK.decryptDataFound (FU.chkKey uri) d of
         Left decError -> return $ Left decError
-        Right plain   -> case FK.parseMetadata plain of
+        Right plain   -> case MD.parseMetadata plain of
           Left e   -> return $ Left e
           Right md -> print md >> return (Right plain)
   
