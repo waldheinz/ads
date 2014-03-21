@@ -3,17 +3,10 @@
 
 module Freenet.Types (
   Key(..), mkKey, mkKey',
-
-  -- * CHKs
-  ChkHeader, mkChkHeader, unChkHeader,
-  chkHeaderHash, chkHeaderCipherLen,
   
-  DataRequest(..),
-  DataFound(..),
-  DataHandler
+  DataRequest(..)
   ) where
 
-import Control.Concurrent.STM
 import qualified Data.ByteString as BS
 import Data.Hashable
 import qualified Data.Text as T
@@ -43,28 +36,3 @@ data DataRequest
    = ChkRequest Key Word8 -- ^ the location and the hash algorithm so it can be verified
    deriving ( Show )
 
-
--- | the header required to verify an CHK data block
-newtype ChkHeader = ChkHeader { unChkHeader :: BS.ByteString }
-
-instance Show ChkHeader where
-  show (ChkHeader bs) = T.unpack $ toBase64' bs
-
-mkChkHeader :: BS.ByteString -> Either T.Text ChkHeader
-mkChkHeader bs
-  | BS.length bs == 36 = Right $ ChkHeader bs
-  | otherwise = Left $ "CHK header length must be 36 bytes"
-
-chkHeaderHash :: ChkHeader -> BS.ByteString
-chkHeaderHash = BS.take 32 . BS.drop 2 . unChkHeader
-
-chkHeaderCipherLen :: ChkHeader -> BS.ByteString
-chkHeaderCipherLen = BS.drop 34 . unChkHeader
-
-data DataFound
-   = ChkFound Key ChkHeader BS.ByteString -- location, headers, data
-   
-instance Show DataFound where
-  show (ChkFound k h d) = "ChkFound {k=" ++ (show k) ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
-
-type DataHandler = DataFound -> STM ()

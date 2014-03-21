@@ -20,6 +20,7 @@ import Network
 import System.IO
 
 import Freenet.Base64
+import Freenet.Data
 import Freenet.Types
 
 data Companion = Companion
@@ -50,7 +51,7 @@ initCompanion cfg dfHandler = do
             key <- fromBase64' ktxt >>= mkKey
             hdr <- fromBase64' hstr >>= mkChkHeader
             d <- fromBase64' dstr
-            return $ ChkFound key hdr d
+            mkChkFound key hdr d
 
         case df of
           Left e  -> putStrLn $ "could not parse CHK found response: " ++ T.unpack e

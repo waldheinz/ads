@@ -4,7 +4,6 @@
 module Freenet.Metadata (
   -- * Metadata
   Doctype(..), parseMetadata
-
   ) where
 
 import Control.Monad ( liftM2, replicateM, void, when )

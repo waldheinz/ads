@@ -7,25 +7,22 @@ module Freenet (
 
 import Control.Concurrent.STM
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
-import Data.Digest.Pure.SHA
 import qualified Data.HashMap.Strict as Map
 import qualified Data.Text as T
 
-import Freenet.Base64
 import qualified Freenet.Companion as FC
-import qualified Freenet.Keys as FK
+import qualified Freenet.Data as FD
 import qualified Freenet.Metadata as MD
 import qualified Freenet.Store as FS
 import Freenet.Types
 import qualified Freenet.URI as FU
 
 data Freenet = FN
-               { fnChkStore  :: FS.FileStore FK.CHK'
+               { fnChkStore  :: FS.FileStore FD.CHK'
                , fnCompanion :: Maybe FC.Companion
-               , fnRequests  :: TVar (Map.HashMap Key [DataHandler])
+               , fnRequests  :: TVar (Map.HashMap Key [FD.DataHandler])
                }
 
 -- | initializes Freenet subsystem
@@ -47,17 +44,19 @@ initFn cfg = do
       comp <- FC.initCompanion ccfg (offer fn)
       return $ fn { fnCompanion = Just comp }
 
-offer :: Freenet -> DataHandler
-offer fn df@(ChkFound key _ _) = do
+offer :: Freenet -> FD.DataHandler
+offer fn df = do
   m <- readTVar (fnRequests fn)
   mapM_ (\h -> h df) $ Map.lookupDefault [] key m
   modifyTVar (fnRequests fn) (Map.delete key)
-
+  where
+    key = FD.dataFoundLocation df
+    
 -- FIXME: we cannot unregister handlers
-addHandler :: Freenet -> Key -> DataHandler -> STM ()
+addHandler :: Freenet -> Key -> FD.DataHandler -> STM ()
 addHandler fn key dh = modifyTVar (fnRequests fn) $ Map.insertWith (++) key [dh]
 
-waitDataFound :: Freenet -> Key -> IO (Either T.Text DataFound)
+waitDataFound :: Freenet -> Key -> IO (Either T.Text FD.DataFound)
 waitDataFound fn key = do
   timeout <- registerDelay (1000 * 1000 * 10)
   
@@ -88,12 +87,8 @@ fetchUri fn uri = do
   
   case df of
     Left e  -> return $ Left e
-    Right d@(ChkFound k hdr da) -> do
-      print ("key", k)
-      print ("headers", (toBase64' . unChkHeader) hdr)
-      print ("hash", showDigest $ sha256 $ BSL.fromStrict da)
-      
-      case FK.decryptDataFound (FU.chkKey uri) d of
+    Right d -> do
+      case FD.decryptDataFound (FU.chkKey uri) d of
         Left decError -> return $ Left decError
         Right plain   -> case MD.parseMetadata plain of
           Left e   -> return $ Left e
