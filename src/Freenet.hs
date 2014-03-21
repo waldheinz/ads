@@ -89,7 +89,7 @@ fetchUri fn uri = do
     Left e  -> return $ Left e
     Right d@(ChkFound k hdr da) -> do
       print ("key", k)
-      print ("headers", toBase64' hdr)
+      print ("headers", (toBase64' . unChkHeader) hdr)
       print ("hash", showDigest $ sha256 $ BSL.fromStrict da)
       
       case FK.decryptDataFound (FU.chkKey uri) d of

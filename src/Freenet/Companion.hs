@@ -48,7 +48,7 @@ initCompanion cfg dfHandler = do
           (dstr, _) = breakSpace rest''
           df = do
             key <- fromBase64' ktxt >>= mkKey
-            hdr <- fromBase64' hstr
+            hdr <- fromBase64' hstr >>= mkChkHeader
             d <- fromBase64' dstr
             return $ ChkFound key hdr d
 

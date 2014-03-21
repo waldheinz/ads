@@ -45,8 +45,8 @@ decryptDataFound
   -> Either T.Text BS.ByteString  -- ^ the decrypted payload
 decryptDataFound key (ChkFound _ header ciphertext) =
   let
-    hash = BS.take 32 $ BS.drop 2 header
-    cipherLen = BS.drop 34 header
+    hash = chkHeaderHash header
+    cipherLen = chkHeaderCipherLen header
     iv = BS.take 16 hash
     aes = initAES $ unKey key
     plaintext'' = decryptCTR aes iv $ BS.concat [ciphertext, cipherLen] -- TODO get rid of the concat
