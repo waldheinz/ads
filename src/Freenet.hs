@@ -5,6 +5,7 @@ module Freenet (
   Freenet, initFn, fetchUri
   ) where
 
+import qualified Codec.Compression.GZip as Gzip
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
 import Control.Monad ( void )
@@ -106,7 +107,7 @@ handleRequest fn dr = do
       Just c  -> FC.getData c dr
 
 fetchRedirect :: Freenet -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
-fetchRedirect fn (SplitFile comp segs) = do
+fetchRedirect fn (SplitFile comp dlen olen segs) = do
   let
     -- TODO: use FEC check blocks as well
     segUris = catMaybes $ map (\(SplitFileSegment uri isd) -> if isd then Just uri else Nothing) segs
@@ -128,29 +129,21 @@ fetchRedirect fn (SplitFile comp segs) = do
     ps = map (\(mdf, key) -> dec mdf key) $ zip ds keys
     (es, bs) = partitionEithers ps
 
-  return $ if null es
-           then Right $ BSL.fromChunks bs
-           else Left $ T.intercalate ", " es
-{-
-fetchDocument
-  :: Freenet
-  -> [T.Text]          -- ^ path to the manifest entry to fetch (ignored to redirects)
-  -> BS.ByteString
-  -> IO (Either T.Text BSL.ByteString)
-fetchDocument fn (p:ps) plain = case parseMetadata plain of
-  Left e -> return $ Left e
-  Right (Manifest entries)   -> case lookup p entries of
-    Nothing -> return $ Left "could not resove path"
-    Just md -> fetchRedirect fn md
-  Right (SimpleRedirect _ r) -> fetchRedirect fn r -- TODO: check hash(es)
--}
+  if (not . null) es
+    then return $ Left $ T.intercalate ", " es
+    else do
+      let cdata = BSL.take (fromIntegral dlen) $ BSL.fromChunks bs
+      case comp of
+        None -> return $ Right $ cdata
+        Gzip -> return $ Right $ BSL.take (fromIntegral olen) $ Gzip.decompress cdata -- FIXME: does decompress throw in illegal input? seems likely
+        x    -> return $ Left $ T.pack $ "unsupported compression codec " ++ show x
 
 resolvePath
   :: Freenet
   -> [T.Text]  -- ^ path elements to be resolved
   -> Metadata  -- ^ the metadata where we try to locate the entries in
   -> IO (Either T.Text RedirectTarget) -- ^ either we fail, or we locate the final redirect step
-resolvePath _ [] (SimpleRedirect _ tgt) = return $ Right tgt -- fetchRedirect fn tgt -- we're done
+resolvePath _ [] (SimpleRedirect _ tgt) = return $ Right tgt -- we're done
 resolvePath fn (p:ps) (Manifest es) = print (p, es) >> case lookup p es of
   Nothing -> return $ Left $ "could not find path in manifest: " `T.append` p
   Just md -> resolvePath fn ps md

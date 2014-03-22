@@ -4,8 +4,9 @@
 module Main ( main ) where
 
 import Control.Concurrent.STM
-import Control.Monad ( void )
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
+import qualified Data.Text as T
 import Network ( withSocketsDo )
 
 import Freenet as FN
@@ -36,4 +37,6 @@ main = withSocketsDo $ do
     
   case FU.parseUri uri of
     Left e -> error $ show e
-    Right u -> void $ FN.fetchUri fn u
+    Right u -> FN.fetchUri fn u >>= \r -> case r of
+      Left e -> error $ T.unpack e
+      Right bs -> BSL.writeFile "fetched" bs

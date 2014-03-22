@@ -3,7 +3,7 @@
 
 module Freenet.Metadata (
   -- * Metadata
-  Metadata(..), parseMetadata,
+  Metadata(..), parseMetadata, CompressionCodec(..),
 
   -- * Redirects
   RedirectTarget(..),
@@ -131,11 +131,13 @@ getSplitFileSegment common isData =
 
 data RedirectTarget
   = SplitFile
-    { sfCompression :: CompressionCodec
-    , sfSegments    :: [SplitFileSegment]
+    { sfCompression    :: CompressionCodec   -- ^ the compression codec used by this splitfile
+    , sfCompressedSize :: Word64             -- ^ size of compressed data, equals original size if not compressed
+    , sfOriginalSize   :: Word64             -- ^ size of original data before compression was applied
+    , sfSegments       :: [SplitFileSegment] -- ^ the segments this split consists of
     }
     deriving ( Show )
-             
+
 getSplitFile
   :: Word16     -- ^ flags
   -> Maybe Key  -- ^ (single crypto key for all segments), if those are common
@@ -179,7 +181,7 @@ getSplitFile flags mkey = do
       dataBlocks  <- replicateM (fromIntegral splitfileBlocks)      $ getSplitFileSegment gsfsParams True
       checkBlocks <- replicateM (fromIntegral splitfileCheckBlocks) $ getSplitFileSegment gsfsParams False
       
-      return $! SplitFile ccodec $ dataBlocks ++ checkBlocks
+      return $! SplitFile ccodec dlen olen $ dataBlocks ++ checkBlocks
       
     x -> fail $ "unknown splitfile algo " ++ show x
 
