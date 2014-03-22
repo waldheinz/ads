@@ -23,6 +23,7 @@ import Data.ByteString.Lazy ( fromStrict )
 import Data.Digest.Pure.SHA
 import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
+import Data.Text.Encoding ( decodeUtf8' )
 
 import Freenet.Mime
 import Freenet.Types
@@ -88,7 +89,7 @@ flagBit f = case f of
   SpecifySplitfileKey -> 1024
   HashThisLayer       -> 2048
 
-data CompressionCodec = None | Bzip2 deriving ( Show )
+data CompressionCodec = None | Gzip | Bzip2 deriving ( Show )
 
 getMime
   :: Word16    -- ^ doctype - level flags
@@ -146,6 +147,7 @@ getSplitFile flags mkey = do
   (ccodec, olen) <- if (flagSet flags (flagBit Compressed))
                     then do
                       c <- getWord16be >>= \c -> case c of
+                        0 -> return Gzip
                         1 -> return Bzip2
                         x -> fail $ "unknown compressor " ++ show x
                       len <- getWord64be
@@ -181,12 +183,39 @@ getSplitFile flags mkey = do
       
     x -> fail $ "unknown splitfile algo " ++ show x
 
+--------------------------------------------------------------------------
+-- top-level metadata
+--------------------------------------------------------------------------
+
 data Metadata
   = SimpleRedirect
     { srHashes      :: [(HashType, BS.ByteString)]
     , srTarget      :: RedirectTarget
     }
+  | Manifest
+    { mEntries      :: [(T.Text, Metadata)]
+    }
     deriving ( Show )
+
+getManifestEntry :: Get (T.Text, Metadata)
+getManifestEntry = do
+  nameLen <- getWord16be
+  nameBytes <- getByteString (fromIntegral nameLen)
+
+  case decodeUtf8' nameBytes of
+    Left e     -> fail $ "invalid UTF8 in entry name " ++ show e
+    Right name -> do
+      mLen <- getWord16be
+      mBytes <- getLazyByteString (fromIntegral mLen)
+      case decodeOrFail mBytes of
+        Left (_, _, e) -> fail $ "error parsing manifest entry \"" ++ T.unpack name ++ "\": " ++ e
+        Right  (_, _, m) -> return (name, m)
+
+getSimpleManifest :: Get Metadata
+getSimpleManifest = do
+  entryCount <- getWord32be
+  entries <- replicateM (fromIntegral entryCount) getManifestEntry
+  return $ Manifest entries
 
 getSimpleRedirect :: Get Metadata
 getSimpleRedirect = do
@@ -208,7 +237,7 @@ getSimpleRedirect = do
             else fail $ "unknown redirect target type"
                  
   return $! SimpleRedirect hashes target 
-             
+
 instance Binary Metadata where
   put _ = error "can't write Doctypes yet"
   
@@ -220,8 +249,9 @@ instance Binary Metadata where
     if magic /= 0xf053b2842d91482b
       then fail "missing magic"
       else case (version, doctype) of
-        (1, 0)  -> getSimpleRedirect
-        dv      -> fail $ "unknown doctype/version " ++ show dv
+        (0, 2) -> getSimpleManifest
+        (1, 0) -> getSimpleRedirect
+        vd     -> fail $ "unknown version/doctype " ++ show vd
     
 parseMetadata :: BS.ByteString -> Either T.Text Metadata
 parseMetadata bs = case decodeOrFail (fromStrict bs) of

@@ -131,14 +131,30 @@ fetchRedirect fn (SplitFile comp segs) = do
   return $ if null es
            then Right $ BSL.fromChunks bs
            else Left $ T.intercalate ", " es
-
+{-
 fetchDocument
   :: Freenet
+  -> [T.Text]          -- ^ path to the manifest entry to fetch (ignored to redirects)
   -> BS.ByteString
   -> IO (Either T.Text BSL.ByteString)
-fetchDocument fn plain = case parseMetadata plain of
+fetchDocument fn (p:ps) plain = case parseMetadata plain of
   Left e -> return $ Left e
+  Right (Manifest entries)   -> case lookup p entries of
+    Nothing -> return $ Left "could not resove path"
+    Just md -> fetchRedirect fn md
   Right (SimpleRedirect _ r) -> fetchRedirect fn r -- TODO: check hash(es)
+-}
+
+resolvePath
+  :: Freenet
+  -> [T.Text]  -- ^ path elements to be resolved
+  -> Metadata  -- ^ the metadata where we try to locate the entries in
+  -> IO (Either T.Text RedirectTarget) -- ^ either we fail, or we locate the final redirect step
+resolvePath _ [] (SimpleRedirect _ tgt) = return $ Right tgt -- fetchRedirect fn tgt -- we're done
+resolvePath fn (p:ps) (Manifest es) = print (p, es) >> case lookup p es of
+  Nothing -> return $ Left $ "could not find path in manifest: " `T.append` p
+  Just md -> resolvePath fn ps md
+resolvePath _ ps md = return $ Left $ T.concat ["cannot locate ", T.pack (show ps), " in ", T.pack (show md)]
 
 -- |
 -- Tries to fetch the specified URI, possibly parsed metadata if it's
@@ -149,10 +165,10 @@ fetchUri fn uri = do
   let
     dr = FU.toDataRequest uri
     key = FU.chkKey uri
-
+    path = FU.uriPath uri
+  
   (DataHandler bucket) <- timeoutHandler fn $ FU.uriLocation uri
   handleRequest fn dr
-  
   df <- atomically $ takeTMVar bucket
   
   case df of
@@ -160,5 +176,12 @@ fetchUri fn uri = do
     Right d -> case FD.decryptDataFound key d of
       Left e          -> return $ Left e
       Right plaintext -> if FU.isControlDocument uri
-                         then fetchDocument fn plaintext
+                         then do
+                           case parseMetadata plaintext of
+                             Left e   -> return $ Left e
+                             Right md -> do
+                               tgt <- resolvePath fn path md
+                               case tgt of
+                                 Left e -> return $ Left e
+                                 Right t -> fetchRedirect fn t
                          else return $ Right (BSL.fromStrict plaintext)

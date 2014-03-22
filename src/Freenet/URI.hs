@@ -3,7 +3,7 @@
 
 module Freenet.URI (
   URI(..), parseUri, toDataRequest, uriLocation,
-  isControlDocument,
+  isControlDocument, uriPath,
 
   -- * CHKs
   ChkExtra, mkChkExtra
@@ -43,7 +43,7 @@ parseChk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') s
     e <- fromBase64' estr >>= \eb -> if BS.length eb == 5
                                      then Right $ eb
                                      else Left "CHK extra data must be 5 bytes"
-    return $ CHK rk ck (ChkExtra e) $ T.split (== '/') path
+    return $ CHK rk ck (ChkExtra e) $ T.split (== '/') (T.drop 1 path)
   _ -> Left $ T.concat $ ["expected 3 comma-separated parts in \"", str, "\""]
 
 toDataRequest :: URI -> DataRequest
@@ -60,6 +60,9 @@ isControlDocument (CHK _ _ e _) = chkExtraIsControl e
 
 uriLocation :: URI -> Key
 uriLocation (CHK loc _ _ _) = loc
+
+uriPath :: URI -> [T.Text]
+uriPath (CHK _ _ _ p) = p
 
 --------------------------------------------------------------------------------------
 -- CHK extra data (last URI component)
