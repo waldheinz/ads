@@ -32,7 +32,7 @@ main = withSocketsDo $ do
     print n
   -}
   let
-    uri = "CHK@gH-tDJQQeA0yLf9jGEPLsSZlJ-WKbY4wYFW8BogJRlo,x0sJ16zdebsuehrpvnyRepe9hpdIPJ9wDpUuf~wJ3XA,AAMA--8"
+    uri = "CHK@WwKhAnEKnmJMiHZ-Cs7YTJ8jRS505-WLoVoTK4ZadVg,8-kP5bnx9tpQoMEXm1kQibnblvrQh0hi8-7Bii4uDrY,AAMC--8/088748722_Bob7z854_123_12lo.jpg"
     
   case FU.parseUri uri of
     Left e -> error $ show e

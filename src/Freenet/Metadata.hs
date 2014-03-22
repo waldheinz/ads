@@ -124,7 +124,7 @@ getSplitFileSegment common isData =
         lk = mkKey' location
         ex = mkChkExtra crypt (-1) False
         
-      return $! SplitFileSegment (CHK lk key ex) isData
+      return $! SplitFileSegment (CHK lk key ex []) isData
       
     Nothing -> fail "only shared crypto infos allowed for now"
 

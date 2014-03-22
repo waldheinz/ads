@@ -24,10 +24,11 @@ data URI
        { chkLocation :: Key      -- ^ the routing key
        , chkKey      :: Key      -- ^ the crypto key
        , chkExtra    :: ChkExtra -- ^ extra data about algorithms used, always 5 bytes
+       , chkPath     :: [T.Text] -- ^ the path, already split at "/" chars
        }
 
 instance Show URI where
-  show (CHK l k e) = "CHK@" ++ show l ++ "," ++ show k ++ "," ++ show e
+  show (CHK l k e p) = "CHK@" ++ show l ++ "," ++ show k ++ "," ++ show e ++ (T.unpack $ T.intercalate "/" p)
 
 parseUri :: T.Text -> Either T.Text URI
 parseUri str = case T.take 4 str of
@@ -35,18 +36,18 @@ parseUri str = case T.take 4 str of
   _      -> Left $ T.concat ["cannot recognize URI type of \"", str, "\""]
 
 parseChk :: T.Text -> Either T.Text URI
-parseChk str = case T.split (== ',') str of
+parseChk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') str' of
   [rstr, cstr, estr] -> do
     rk <- fromBase64' rstr >>= mkKey
     ck <- fromBase64' cstr >>= mkKey
     e <- fromBase64' estr >>= \eb -> if BS.length eb == 5
                                      then Right $ eb
                                      else Left "CHK extra data must be 5 bytes"
-    return $ CHK rk ck (ChkExtra e)
+    return $ CHK rk ck (ChkExtra e) $ T.split (== '/') path
   _ -> Left $ T.concat $ ["expected 3 comma-separated parts in \"", str, "\""]
 
 toDataRequest :: URI -> DataRequest
-toDataRequest (CHK loc _ e) = ChkRequest loc $ chkExtraCrypto e
+toDataRequest (CHK loc _ e _) = ChkRequest loc $ chkExtraCrypto e
 
 -- |
 -- Decides if an URI is expected to point to a metadata block
@@ -55,10 +56,10 @@ toDataRequest (CHK loc _ e) = ChkRequest loc $ chkExtraCrypto e
 -- provide information how to assemble the original data referenced
 -- by the URI and specify an MIME type.
 isControlDocument :: URI -> Bool
-isControlDocument (CHK _ _ e) = chkExtraIsControl e
+isControlDocument (CHK _ _ e _) = chkExtraIsControl e
 
 uriLocation :: URI -> Key
-uriLocation (CHK loc _ _) = loc
+uriLocation (CHK loc _ _ _) = loc
 
 --------------------------------------------------------------------------------------
 -- CHK extra data (last URI component)
