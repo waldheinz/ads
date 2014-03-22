@@ -277,14 +277,14 @@ getKey flags =
   then do
     -- full keys
     kl <- getWord16be
-    kb <- traceShow kl $ getLazyByteString $ fromIntegral 100
+    kb <- traceShow kl $ getLazyByteString $ fromIntegral kl
     
     case decodeOrFail kb of
       Left  (_, _, e) -> traceShow kb $ fail $ "error reading full key:" ++ e
       Right (_, _, k) -> return k
       
   else do
-    -- short keys.  store extra first so we can't parse with Applicative, yeah
+    -- short keys -- store extra first so we can't parse with Applicative, great
     e <- get
     (l, c) <- liftM2 (,) get get
     return $ CHK l c e []
