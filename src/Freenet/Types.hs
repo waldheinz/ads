@@ -32,7 +32,6 @@ instance Binary Key where
   put (Key k) = putByteString k
   get = Key <$> getByteString keySize
 
-
 mkKey :: BS.ByteString -> Either T.Text Key
 mkKey bs = if BS.length bs == keySize
            then Right $ Key bs

@@ -9,12 +9,15 @@ module Freenet.URI (
   ChkExtra, mkChkExtra
   ) where
 
+import Control.Applicative ( (<$>) )
+import Data.Binary
+import Data.Binary.Get
+import Data.Binary.Put
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Builder as BSB
 import Data.Monoid
 import qualified Data.Text as T
-import Data.Word
 
 import Freenet.Base64
 import Freenet.Types  
@@ -72,6 +75,10 @@ newtype ChkExtra = ChkExtra { unChkExtra :: BS.ByteString }
 
 instance Show ChkExtra where
   show (ChkExtra bs) = T.unpack $ toBase64' bs
+
+instance Binary ChkExtra where
+  put (ChkExtra bs) = putByteString bs
+  get = ChkExtra <$> getByteString 5
 
 -- | construct CHK extra data
 mkChkExtra

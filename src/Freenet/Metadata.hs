@@ -72,7 +72,7 @@ deriveCryptoKey hashes = lookup SHA256 hashes >>= \h -> case mkey h of
     mkey hash = mkKey $ BSL.toStrict $ bytestringDigest $ sha256 (BSL.fromChunks [hash, BSC.pack "SPLITKEY"] )
 
 data Flag = FlagSplitFile | Hashes | SpecifySplitfileKey | HashThisLayer
-          | TopSize | Compressed | NoMime | CompressedMime | Dbr
+          | TopSize | FullKeys | Compressed | NoMime | CompressedMime | Dbr
           | ExtraMetadata
           deriving ( Show )
 
@@ -83,6 +83,7 @@ flagBit f = case f of
   NoMime              -> 4
   CompressedMime      -> 8
   ExtraMetadata       -> 16
+  FullKeys            -> 32
   Compressed          -> 128
   TopSize             -> 256
   Hashes              -> 512
@@ -135,6 +136,7 @@ data RedirectTarget
     , sfCompressedSize :: Word64             -- ^ size of compressed data, equals original size if not compressed
     , sfOriginalSize   :: Word64             -- ^ size of original data before compression was applied
     , sfSegments       :: [SplitFileSegment] -- ^ the segments this split consists of
+    , sfMime           :: Maybe Mime         -- ^ MIME type of the target data
     }
     deriving ( Show )
 
@@ -181,7 +183,7 @@ getSplitFile flags mkey = do
       dataBlocks  <- replicateM (fromIntegral splitfileBlocks)      $ getSplitFileSegment gsfsParams True
       checkBlocks <- replicateM (fromIntegral splitfileCheckBlocks) $ getSplitFileSegment gsfsParams False
       
-      return $! SplitFile ccodec dlen olen $ dataBlocks ++ checkBlocks
+      return $! SplitFile ccodec dlen olen (dataBlocks ++ checkBlocks) mime
       
     x -> fail $ "unknown splitfile algo " ++ show x
 
@@ -197,8 +199,48 @@ data Metadata
   | Manifest
     { mEntries      :: [(T.Text, Metadata)]
     }
-    deriving ( Show )
+  | ArchiveManifest
+    { amUri    :: URI
+    , amMime   :: Maybe Mime
+    , amType   :: ArchiveManifestType
+    , amHashes :: [(HashType, BS.ByteString)]
+    }
+  deriving ( Show )
 
+data ArchiveManifestType = ZIP | TAR deriving ( Eq, Show )
+
+getArchiveManifest :: Get Metadata
+getArchiveManifest = do
+  flags <- getWord16be
+  
+  hashes <- if flagSet flags (flagBit Hashes)
+    then getHashes 
+    else return []
+
+  atype <- do
+    tw <- getWord16be
+    case tw of
+      0 -> return ZIP
+      1 -> return TAR
+      x -> fail $ "unknown archive type " ++ show x
+      
+  mime <- getMime flags
+
+  when (flagSet flags (flagBit HashThisLayer)) $ fail "unsupported hashThisLayer flag set"
+  when (flagSet flags (flagBit TopSize)) $ fail "unsupported topSize flag set"
+  when (flagSet flags (flagBit SpecifySplitfileKey)) $ fail "unsupported specifySplitfileKey flag set"
+  when (flagSet flags (flagBit Dbr)) $ fail "unsupported dbr flag set"
+  when (flagSet flags (flagBit ExtraMetadata)) $ fail "unsupported extraMetadata flag set"
+
+  key <- if flagSet flags (flagBit FullKeys)
+         then fail "cannot parse full-key archive manifests"
+         else do
+           e <- get -- yeah, store extra first so we can't parse with Applicative
+           (l, c) <- liftM2 (,) get get
+           return $ CHK l c e []
+
+  return $ ArchiveManifest key mime atype hashes
+  
 getManifestEntry :: Get (T.Text, Metadata)
 getManifestEntry = do
   nameLen <- getWord16be
@@ -253,6 +295,7 @@ instance Binary Metadata where
       else case (version, doctype) of
         (0, 2) -> getSimpleManifest
         (1, 0) -> getSimpleRedirect
+        (1, 3) -> getArchiveManifest
         vd     -> fail $ "unknown version/doctype " ++ show vd
     
 parseMetadata :: BS.ByteString -> Either T.Text Metadata

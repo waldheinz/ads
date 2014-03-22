@@ -107,7 +107,7 @@ handleRequest fn dr = do
       Just c  -> FC.getData c dr
 
 fetchRedirect :: Freenet -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
-fetchRedirect fn (SplitFile comp dlen olen segs) = do
+fetchRedirect fn (SplitFile comp dlen olen segs _) = do -- TODO: we're not returning the MIME
   let
     -- TODO: use FEC check blocks as well
     segUris = catMaybes $ map (\(SplitFileSegment uri isd) -> if isd then Just uri else Nothing) segs
