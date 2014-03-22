@@ -5,6 +5,7 @@ module Freenet (
   Freenet, initFn, fetchUri
   ) where
 
+import qualified Codec.Archive.Tar as TAR
 import qualified Codec.Compression.GZip as Gzip
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
@@ -138,15 +139,43 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) = do -- TODO: we're not retur
         Gzip -> return $ Right $ BSL.take (fromIntegral olen) $ Gzip.decompress cdata -- FIXME: does decompress throw on illegal input? seems likely
         x    -> return $ Left $ T.pack $ "unsupported compression codec " ++ show x
 
+-- | FIXME: watch out for infinite redirects
 resolvePath
   :: Freenet
   -> [T.Text]  -- ^ path elements to be resolved
   -> Metadata  -- ^ the metadata where we try to locate the entries in
   -> IO (Either T.Text RedirectTarget) -- ^ either we fail, or we locate the final redirect step
-resolvePath _ [] (SimpleRedirect _ tgt) = return $ Right tgt -- we're done
+
 resolvePath fn (p:ps) (Manifest es) = print (p, es) >> case lookup p es of
   Nothing -> return $ Left $ "could not find path in manifest: " `T.append` p
   Just md -> resolvePath fn ps md
+
+resolvePath fn ps (ArchiveManifest uri _ TAR _) = do
+  archive <- fetchUri fn uri
+  
+  case archive of
+    Left e -> return $ Left e
+    Right bs -> do
+      let
+        -- locate the ".metadata" entry in the TAR archive. heavens, why do people do this?
+        mec = TAR.foldEntries
+              (\e x -> case TAR.entryPath e of
+                  ".metadata" -> Just $ TAR.entryContent e
+                  x           -> Nothing)
+              Nothing
+              (\e -> Nothing) $ TAR.read bs
+      case mec of
+        Just (TAR.NormalFile bs sz) -> do
+          case parseMetadata (BSL.toStrict bs) of
+            Left e -> return $ Left $ "error parsing metadata from TAR archive: " `T.append` e
+            Right md -> resolvePath fn ps md
+        Just _ -> return $ Left "the .metadata entry is of unknown type"
+        _      -> return $ Left "no .metadata entry found in TAR archive"
+        
+--  return $ Left "am"
+
+resolvePath _ [] (SimpleRedirect _ tgt) = return $ Right tgt -- we're done
+
 resolvePath _ ps md = return $ Left $ T.concat ["cannot locate ", T.pack (show ps), " in ", T.pack (show md)]
 
 -- |

@@ -9,7 +9,10 @@ module Freenet.Metadata (
   RedirectTarget(..),
 
   -- * Splitfiles
-  SplitFileSegment(..)
+  SplitFileSegment(..),
+
+  -- * Archive Manifests
+  ArchiveManifestType(..)
   ) where
 
 import Control.Monad ( liftM2, replicateM, void, when )
@@ -140,6 +143,21 @@ data RedirectTarget
     }
     deriving ( Show )
 
+getCompression
+  :: Word16 -- ^ flags
+  -> Word64 -- ^ data length 
+  -> Get (CompressionCodec, Word64)
+getCompression flags dlen =
+  if (flagSet flags (flagBit Compressed))
+  then do
+    c <- getWord16be >>= \c -> case c of
+      0 -> return Gzip
+      1 -> return Bzip2
+      x -> fail $ "unknown compressor " ++ show x
+    len <- getWord64be
+    return (c, len)
+  else return (None, dlen)
+
 getSplitFile
   :: Word16     -- ^ flags
   -> Maybe Key  -- ^ (single crypto key for all segments), if those are common
@@ -148,16 +166,8 @@ getSplitFile flags mkey = do
   cryptoAlgo <- getWord8
   dlen <- getWord64be
   
-  (ccodec, olen) <- if (flagSet flags (flagBit Compressed))
-                    then do
-                      c <- getWord16be >>= \c -> case c of
-                        0 -> return Gzip
-                        1 -> return Bzip2
-                        x -> fail $ "unknown compressor " ++ show x
-                      len <- getWord64be
-                      return (c, len)
-                    else return (None, dlen)
-
+  (ccodec, olen) <- getCompression flags dlen
+    
   mime <- getMime flags
   sfAlgo <- getWord16be
   
@@ -200,10 +210,10 @@ data Metadata
     { mEntries      :: [(T.Text, Metadata)]
     }
   | ArchiveManifest
-    { amUri    :: URI
-    , amMime   :: Maybe Mime
-    , amType   :: ArchiveManifestType
-    , amHashes :: [(HashType, BS.ByteString)]
+    { amUri         :: URI
+    , amMime        :: Maybe Mime
+    , amType        :: ArchiveManifestType
+    , amHashes      :: [(HashType, BS.ByteString)]
     }
   deriving ( Show )
 
@@ -223,9 +233,10 @@ getArchiveManifest = do
       0 -> return ZIP
       1 -> return TAR
       x -> fail $ "unknown archive type " ++ show x
-      
-  mime <- getMime flags
 
+  mime <- getMime flags
+  
+  when (flagSet flags (flagBit Compressed)) $ fail "an archive manifest cannot be compressed"
   when (flagSet flags (flagBit HashThisLayer)) $ fail "unsupported hashThisLayer flag set"
   when (flagSet flags (flagBit TopSize)) $ fail "unsupported topSize flag set"
   when (flagSet flags (flagBit SpecifySplitfileKey)) $ fail "unsupported specifySplitfileKey flag set"
