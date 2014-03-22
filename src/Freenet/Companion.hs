@@ -27,7 +27,7 @@ data Companion = Companion
                  { cHandle :: Handle
                  }
 
-initCompanion :: CFG.Config -> DataHandler -> IO Companion
+initCompanion :: CFG.Config -> (DataFound -> STM ()) -> IO Companion
 initCompanion cfg dfHandler = do
   host <- CFG.require cfg "host"
   port <- CFG.require cfg "port" :: IO Int

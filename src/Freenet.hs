@@ -5,7 +5,9 @@ module Freenet (
   Freenet, initFn, fetchUri
   ) where
 
+import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
+import Control.Monad ( void )
 import qualified Data.ByteString as BS
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
@@ -19,10 +21,12 @@ import qualified Freenet.Store as FS
 import Freenet.Types
 import qualified Freenet.URI as FU
 
+newtype DataHandler = DataHandler (TMVar (Either T.Text FD.DataFound)) deriving ( Eq )
+
 data Freenet = FN
-               { fnStore  :: FS.FileStore
+               { fnStore     :: FS.FileStore
                , fnCompanion :: Maybe FC.Companion
-               , fnRequests  :: TVar (Map.HashMap Key [FD.DataHandler])
+               , fnRequests  :: TVar (Map.HashMap Key [DataHandler])
                }
 
 -- | initializes Freenet subsystem
@@ -44,50 +48,64 @@ initFn cfg = do
       comp <- FC.initCompanion ccfg (offer fn)
       return $ fn { fnCompanion = Just comp }
 
-offer :: Freenet -> FD.DataHandler
+offer :: Freenet -> FD.DataFound -> STM ()
 offer fn df = do
-  -- maybe write to our store
+  -- write to our store
   FS.putData (fnStore fn) df
 
   -- inform other registered handlers
   m <- readTVar (fnRequests fn)
-  mapM_ (\h -> h df) $ Map.lookupDefault [] key m
+  mapM_ (\(DataHandler bucket) -> putTMVar bucket (Right df)) $ Map.lookupDefault [] key m
   modifyTVar (fnRequests fn) (Map.delete key)
   where
     key = FD.dataFoundLocation df
     
 -- FIXME: we cannot unregister handlers
-addHandler :: Freenet -> Key -> FD.DataHandler -> STM ()
+addHandler :: Freenet -> Key -> DataHandler -> STM ()
 addHandler fn key dh = modifyTVar (fnRequests fn) $ Map.insertWith (++) key [dh]
 
-waitDataFound :: Freenet -> Key -> IO (Either T.Text FD.DataFound)
-waitDataFound fn key = do
+removeHandler :: Freenet -> Key -> DataHandler -> STM ()
+removeHandler = error "removeHandler"
+
+-- | creates a dataHandler which will set it's bucket to Nothing after a timeout
+timeoutHandler :: Freenet -> Key -> IO DataHandler
+timeoutHandler fn key = do
   timeout <- registerDelay (1000 * 1000 * 10)
   
-  df <- atomically $ do
+  dh@(DataHandler bucket) <- atomically $ do
     dfc <- newEmptyTMVar
-    addHandler fn key $ putTMVar dfc
-    return dfc
+    let dh = DataHandler dfc
+    addHandler fn key dh
+    return dh
+  
+  void $ forkIO $ atomically $ do
+    empty <- isEmptyTMVar bucket
 
-  atomically $ do
-    x <- tryReadTMVar df
-    case x of
-      Just d  -> return $ Right d
-      Nothing -> readTVar timeout >>= \to -> if to
-                                             then return $ Left "timeout"
-                                             else retry
+    if empty
+      then readTVar timeout >>= \to -> if to
+                                       then putTMVar bucket (Left "timeout") >> removeHandler fn key dh
+                                       else retry
+      else return ()
+    
+  return dh
   
 handleRequest :: Freenet -> DataRequest -> IO ()
 handleRequest fn dr = do
-  case fnCompanion fn of
-    Nothing -> return ()
-    Just c  -> FC.getData c dr
-
+  fromStore <- FS.getData (fnStore fn) dr
+  
+  case fromStore of
+    Just df -> atomically $ offer fn df
+    Nothing -> case fnCompanion fn of
+      Nothing -> return ()
+      Just c  -> FC.getData c dr
+      
 fetchUri :: Freenet -> FU.URI -> IO (Either T.Text BS.ByteString)
 fetchUri fn uri = do
   let dr = FU.toDataRequest uri
+  (DataHandler bucket) <- timeoutHandler fn $ FU.uriLocation uri
   handleRequest fn dr
-  df <- waitDataFound fn (FU.uriLocation uri)
+  
+  df <- atomically $ takeTMVar bucket
   
   case df of
     Left e  -> return $ Left e

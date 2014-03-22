@@ -35,4 +35,4 @@ main = withSocketsDo $ do
 
   case FU.parseUri uri of
     Left e -> error $ show e
-    Right u -> void $ FN.fetchUri fn u
+    Right u -> void $ FN.fetchUri fn u >>= print

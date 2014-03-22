@@ -9,13 +9,10 @@ module Freenet.Data (
 
   -- * Successfully retrieved data
   DataFound, mkChkFound, dataFoundLocation,
-  decryptDataFound, -- dataFoundPayload,
-  
-  DataHandler
+  decryptDataFound
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
-import Control.Monad.STM
 import Crypto.Cipher.AES
 import Data.Binary
 import Data.Binary.Get
@@ -108,5 +105,3 @@ decryptDataFound key (ChkFound _ header ciphertext)
     len = fromIntegral $ runGet getWord16be $ fromStrict lenbytes
     plaintext = BS.take len plaintext'
     mac = bytestringDigest (hmacSha256 (fromStrict $ unKey key) (fromStrict plaintext''))
-
-type DataHandler = DataFound -> STM ()
