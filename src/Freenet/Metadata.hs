@@ -15,7 +15,8 @@ module Freenet.Metadata (
   ArchiveManifestType(..)
   ) where
 
-import Control.Monad ( liftM2, replicateM, void, when )
+import Control.Applicative ( (<$>) )
+import Control.Monad ( liftM2, replicateM, unless, void, when )
 import Data.Binary
 import Data.Binary.Get
 import Data.Bits
@@ -27,6 +28,8 @@ import Data.Digest.Pure.SHA
 import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8' )
+
+import Debug.Trace
 
 import Freenet.Mime
 import Freenet.Types
@@ -141,6 +144,10 @@ data RedirectTarget
     , sfSegments       :: [SplitFileSegment] -- ^ the segments this split consists of
     , sfMime           :: Maybe Mime         -- ^ MIME type of the target data
     }
+  | RedirectKey
+    { rkMime :: Maybe Mime
+    , rkUri  :: URI
+    }
     deriving ( Show )
 
 getCompression
@@ -215,7 +222,23 @@ data Metadata
     , amType        :: ArchiveManifestType
     , amHashes      :: [(HashType, BS.ByteString)]
     }
+  | SymbolicShortlink
+    { slTarget      :: T.Text
+    }
   deriving ( Show )
+
+getSymbolicShortlink :: Get Metadata
+getSymbolicShortlink = do
+  flags    <- getWord16be
+  tgtLen   <- getWord16be
+  tgtBytes <- getByteString (fromIntegral tgtLen)
+
+  -- only NoMIME has ever been seen
+  unless (flags == 4) $ fail $ "unexpected flags on symbolic short link " ++ show flags
+  
+  case decodeUtf8' tgtBytes of
+    Left e    -> fail $ "invalid UTF8 in symbolic short link " ++ show e
+    Right tgt -> return $ SymbolicShortlink tgt
 
 data ArchiveManifestType = ZIP | TAR deriving ( Eq, Show )
 
@@ -243,14 +266,28 @@ getArchiveManifest = do
   when (flagSet flags (flagBit Dbr)) $ fail "unsupported dbr flag set"
   when (flagSet flags (flagBit ExtraMetadata)) $ fail "unsupported extraMetadata flag set"
 
-  key <- if flagSet flags (flagBit FullKeys)
-         then fail "cannot parse full-key archive manifests"
-         else do
-           e <- get -- yeah, store extra first so we can't parse with Applicative
-           (l, c) <- liftM2 (,) get get
-           return $ CHK l c e []
-
+  key <- getKey flags
   return $ ArchiveManifest key mime atype hashes
+
+getKey
+  :: Word16 -- ^ flags
+  -> Get URI
+getKey flags =
+  if flagSet flags (flagBit FullKeys)
+  then do
+    -- full keys
+    kl <- getWord16be
+    kb <- traceShow kl $ getLazyByteString $ fromIntegral 100
+    
+    case decodeOrFail kb of
+      Left  (_, _, e) -> traceShow kb $ fail $ "error reading full key:" ++ e
+      Right (_, _, k) -> return k
+      
+  else do
+    -- short keys.  store extra first so we can't parse with Applicative, yeah
+    e <- get
+    (l, c) <- liftM2 (,) get get
+    return $ CHK l c e []
   
 getManifestEntry :: Get (T.Text, Metadata)
 getManifestEntry = do
@@ -261,37 +298,42 @@ getManifestEntry = do
     Left e     -> fail $ "invalid UTF8 in entry name " ++ show e
     Right name -> do
       mLen <- getWord16be
-      mBytes <- getLazyByteString (fromIntegral mLen)
+      mBytes <- traceShow ("allow", mLen) $ getLazyByteString (fromIntegral mLen)
       case decodeOrFail mBytes of
-        Left (_, _, e) -> fail $ "error parsing manifest entry \"" ++ T.unpack name ++ "\": " ++ e
-        Right  (_, _, m) -> return (name, m)
+        Left  (_, _, e) -> fail $ "error parsing manifest entry \"" ++ T.unpack name ++ "\": " ++ e
+        Right (_, _, m) -> return (name, m)
 
 getSimpleManifest :: Get Metadata
 getSimpleManifest = do
   entryCount <- getWord32be
-  entries <- replicateM (fromIntegral entryCount) getManifestEntry
+  entries <- replicateM (fromIntegral entryCount) $ getManifestEntry >>= (\e -> traceShow e $ return e)
   return $ Manifest entries
 
-getSimpleRedirect :: Get Metadata
-getSimpleRedirect = do
+getSimpleRedirect :: Version -> Get Metadata
+getSimpleRedirect v = do
   flags <- getWord16be
 
   hashes <- if flagSet flags (flagBit Hashes)
     then getHashes 
     else return []
 
-  when (not (elem SHA256 $ map fst hashes)) $ fail "no SHA256 hash specified"
+  when (v == V1 && not (elem SHA256 $ map fst hashes)) $ fail "no SHA256 hash specified in V1 redirect"
   when (flagSet flags (flagBit HashThisLayer)) $ fail "unsupported hashThisLayer flag set"
   when (flagSet flags (flagBit TopSize)) $ fail "unsupported topSize flag set"
   when (flagSet flags (flagBit SpecifySplitfileKey)) $ fail "unsupported specifySplitfileKey flag set"
   when (flagSet flags (flagBit Dbr)) $ fail "unsupported dbr flag set"
   when (flagSet flags (flagBit ExtraMetadata)) $ fail "unsupported extraMetadata flag set"
   
-  target <- if flagSet flags (flagBit FlagSplitFile)
+  target <- traceShow ("flags", flags) $ if flagSet flags (flagBit FlagSplitFile)
             then getSplitFile flags (deriveCryptoKey hashes)
-            else fail $ "unknown redirect target type"
+            else do
+              -- unless (flags == 40) $ fail $ "unsupported flags for key redirect " ++ show flags
+              mime <- getMime flags
+              traceShow (mime) $ RedirectKey mime <$> getKey flags
                  
   return $! SimpleRedirect hashes target 
+
+data Version = V0 | V1 deriving ( Eq )
 
 instance Binary Metadata where
   put _ = error "can't write Doctypes yet"
@@ -304,8 +346,10 @@ instance Binary Metadata where
     if magic /= 0xf053b2842d91482b
       then fail "missing magic"
       else case (version, doctype) of
+        (0, 0) -> getSimpleRedirect V0
         (0, 2) -> getSimpleManifest
-        (1, 0) -> getSimpleRedirect
+        (0, 6) -> getSymbolicShortlink
+        (1, 0) -> getSimpleRedirect V1
         (1, 3) -> getArchiveManifest
         vd     -> fail $ "unknown version/doctype " ++ show vd
     

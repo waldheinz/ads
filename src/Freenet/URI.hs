@@ -33,6 +33,19 @@ data URI
 instance Show URI where
   show (CHK l k e p) = "CHK@" ++ show l ++ "," ++ show k ++ "," ++ show e ++ (T.unpack $ T.intercalate "/" p)
 
+instance Binary URI where
+  put _ = error "can't put URIs yet"
+  get = do
+    t <- getWord8
+    
+    case t of
+      1 -> do
+        fail "get CHK"
+      2 -> do
+        fail "get SSK" 
+
+      x -> fail $ "unknown URI type " ++ show x
+      
 parseUri :: T.Text -> Either T.Text URI
 parseUri str = case T.take 4 str of
   "CHK@" -> parseChk (T.drop 4 str)
