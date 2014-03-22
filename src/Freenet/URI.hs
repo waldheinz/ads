@@ -87,7 +87,11 @@ parseChk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') s
     e <- fromBase64' estr >>= \eb -> if BS.length eb == 5
                                      then Right $ eb
                                      else Left "CHK extra data must be 5 bytes"
-    return $ CHK rk ck (ChkExtra e) $ T.split (== '/') (T.drop 1 path)
+    let
+      path' = T.drop 1 path
+      ps = if T.null path' then [] else  T.split (== '/') path'
+                                          
+    return $ CHK rk ck (ChkExtra e) ps -- T.split (== '/') (T.drop 1 path)
   _ -> Left $ T.concat $ ["expected 3 comma-separated parts in \"", str, "\""]
 
 toDataRequest :: URI -> DataRequest
