@@ -135,7 +135,7 @@ fetchRedirect fn (SplitFile comp dlen olen segs) = do
       let cdata = BSL.take (fromIntegral dlen) $ BSL.fromChunks bs
       case comp of
         None -> return $ Right $ cdata
-        Gzip -> return $ Right $ BSL.take (fromIntegral olen) $ Gzip.decompress cdata -- FIXME: does decompress throw in illegal input? seems likely
+        Gzip -> return $ Right $ BSL.take (fromIntegral olen) $ Gzip.decompress cdata -- FIXME: does decompress throw on illegal input? seems likely
         x    -> return $ Left $ T.pack $ "unsupported compression codec " ++ show x
 
 resolvePath

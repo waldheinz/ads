@@ -8,8 +8,10 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import qualified Data.Text as T
 import Network ( withSocketsDo )
+import Network.Wai.Handler.Warp as Warp
 
 import Freenet as FN
+import Freenet.Fproxy as FP
 import Freenet.URI as FU
 import Logging as LOG
 import Net
@@ -28,10 +30,13 @@ main = withSocketsDo $ do
   fn <- FN.initFn (CFG.subconfig "freenet" cfg)
   
   nodeListen (CFG.subconfig "node.listen" cfg) ni p
+
+  Warp.run 8081 (FP.fproxy fn)
+  
   {-
   void $ forkIO $ N.connectNode ni ("127.0.0.1", 1234) $ \n -> do
     print n
-  -}
+  
   let
     uri = "CHK@WwKhAnEKnmJMiHZ-Cs7YTJ8jRS505-WLoVoTK4ZadVg,8-kP5bnx9tpQoMEXm1kQibnblvrQh0hi8-7Bii4uDrY,AAMC--8/088748722_Bob7z854_123_12lo.jpg"
     
@@ -40,3 +45,4 @@ main = withSocketsDo $ do
     Right u -> FN.fetchUri fn u >>= \r -> case r of
       Left e -> error $ T.unpack e
       Right bs -> BSL.writeFile "fetched" bs
+-}
