@@ -3,7 +3,13 @@
 
 module Freenet.Metadata (
   -- * Metadata
-  Doctype(..), parseMetadata
+  Metadata(..), parseMetadata,
+
+  -- * Redirects
+  RedirectTarget(..),
+
+  -- * Splitfiles
+  SplitFileSegment(..)
   ) where
 
 import Control.Monad ( liftM2, replicateM, void, when )
@@ -21,8 +27,6 @@ import qualified Data.Text as T
 import Freenet.Mime
 import Freenet.Types
 import Freenet.URI
-import Types
-
      
 ---------------------------------------------------------------------------------------
 -- Metadata Parsing
@@ -103,12 +107,16 @@ getMime flags =
 
 data SplitFileSegment
   = SplitFileSegment
-    { sfUri :: ! URI
+    { sfUri   :: ! URI   -- ^ the URI where this segment can be fetched
+    , sfsData :: ! Bool  -- ^ True if this is a data block, false if it's a check block
     }
     deriving ( Show )
 
-getSplitFileSegment :: Maybe (Key, Word8) -> Get SplitFileSegment
-getSplitFileSegment common =
+getSplitFileSegment
+  :: Maybe (Key, Word8)    -- ^ maybe common (decryption key, algorithm)
+  -> Bool                  -- ^ if this segment references a data block (it's a FEC check block otherwise)
+  -> Get SplitFileSegment
+getSplitFileSegment common isData =
   case common of
     Just (key, crypt) -> do
       location <- getByteString 32
@@ -116,7 +124,7 @@ getSplitFileSegment common =
         lk = mkKey' location
         ex = mkChkExtra crypt (-1) False
         
-      return $! SplitFileSegment $ CHK lk key ex
+      return $! SplitFileSegment (CHK lk key ex) isData
       
     Nothing -> fail "only shared crypto infos allowed for now"
 
@@ -166,21 +174,21 @@ getSplitFile flags mkey = do
 
       when (segmentCount /= 1) $ fail "only single-segment splitfiles for now"
 
-      dataBlocks  <- replicateM (fromIntegral splitfileBlocks)      $ getSplitFileSegment gsfsParams
-      checkBlocks <- replicateM (fromIntegral splitfileCheckBlocks) $ getSplitFileSegment gsfsParams
+      dataBlocks  <- replicateM (fromIntegral splitfileBlocks)      $ getSplitFileSegment gsfsParams True
+      checkBlocks <- replicateM (fromIntegral splitfileCheckBlocks) $ getSplitFileSegment gsfsParams False
       
       return $! SplitFile ccodec $ dataBlocks ++ checkBlocks
       
     x -> fail $ "unknown splitfile algo " ++ show x
 
-data Doctype
+data Metadata
   = SimpleRedirect
     { srHashes      :: [(HashType, BS.ByteString)]
     , srTarget      :: RedirectTarget
     }
     deriving ( Show )
 
-getSimpleRedirect :: Get Doctype
+getSimpleRedirect :: Get Metadata
 getSimpleRedirect = do
   flags <- getWord16be
 
@@ -201,7 +209,7 @@ getSimpleRedirect = do
                  
   return $! SimpleRedirect hashes target 
              
-instance Binary Doctype where
+instance Binary Metadata where
   put _ = error "can't write Doctypes yet"
   
   get = do
@@ -215,7 +223,7 @@ instance Binary Doctype where
         (1, 0)  -> getSimpleRedirect
         dv      -> fail $ "unknown doctype/version " ++ show dv
     
-parseMetadata :: BS.ByteString -> Either T.Text Doctype
+parseMetadata :: BS.ByteString -> Either T.Text Metadata
 parseMetadata bs = case decodeOrFail (fromStrict bs) of
   Left (_, off, e) -> Left $ T.concat [T.pack e, " at ", T.pack $ show off]
   Right(_, _, md)  -> Right md

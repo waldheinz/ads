@@ -17,7 +17,7 @@ import qualified Data.Text as T
 
 import Freenet.Base64
 
-newtype Key = Key { unKey :: BS.ByteString } deriving ( Eq )
+newtype Key = Key { unKey :: BS.ByteString } deriving ( Eq, Ord )
 
 keySize :: Int
 keySize = 32
@@ -31,7 +31,8 @@ instance Hashable Key where
 instance Binary Key where
   put (Key k) = putByteString k
   get = Key <$> getByteString keySize
-  
+
+
 mkKey :: BS.ByteString -> Either T.Text Key
 mkKey bs = if BS.length bs == keySize
            then Right $ Key bs

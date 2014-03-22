@@ -2,7 +2,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet.URI (
-  URI(..), parseUri, toDataRequest, uriLocation, mkChkExtra
+  URI(..), parseUri, toDataRequest, uriLocation,
+  isControlDocument,
+
+  -- * CHKs
+  ChkExtra, mkChkExtra
   ) where
 
 import qualified Data.ByteString as BS
@@ -11,7 +15,7 @@ import qualified Data.ByteString.Lazy.Builder as BSB
 import Data.Monoid
 import qualified Data.Text as T
 import Data.Word
-  
+
 import Freenet.Base64
 import Freenet.Types  
 
@@ -44,6 +48,15 @@ parseChk str = case T.split (== ',') str of
 toDataRequest :: URI -> DataRequest
 toDataRequest (CHK loc _ e) = ChkRequest loc $ chkExtraCrypto e
 
+-- |
+-- Decides if an URI is expected to point to a metadata block
+-- (aka control document). This is usually the case for URIs
+-- presented to the user. The control document will generally
+-- provide information how to assemble the original data referenced
+-- by the URI and specify an MIME type.
+isControlDocument :: URI -> Bool
+isControlDocument (CHK _ _ e) = chkExtraIsControl e
+
 uriLocation :: URI -> Key
 uriLocation (CHK loc _ _) = loc
 
@@ -70,3 +83,6 @@ mkChkExtra crypt compr contr = ChkExtra $ BSL.toStrict $
 -- | extract the crypto algorithm used from an ChkExtra
 chkExtraCrypto :: ChkExtra -> Word8
 chkExtraCrypto ce = BS.index (unChkExtra ce) 1
+
+chkExtraIsControl :: ChkExtra -> Bool
+chkExtraIsControl ce = 2 == BS.index (unChkExtra ce) 2

@@ -9,14 +9,17 @@ import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
 import Control.Monad ( void )
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
-import qualified Data.HashMap.Strict as Map
+import Data.Either ( partitionEithers )
+import qualified Data.Map.Strict as Map
+import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 
 import qualified Freenet.Companion as FC
 import qualified Freenet.Data as FD
-import qualified Freenet.Metadata as MD
+import Freenet.Metadata
 import qualified Freenet.Store as FS
 import Freenet.Types
 import qualified Freenet.URI as FU
@@ -26,7 +29,7 @@ newtype DataHandler = DataHandler (TMVar (Either T.Text FD.DataFound)) deriving 
 data Freenet = FN
                { fnStore     :: FS.FileStore
                , fnCompanion :: Maybe FC.Companion
-               , fnRequests  :: TVar (Map.HashMap Key [DataHandler])
+               , fnRequests  :: TVar (Map.Map Key [DataHandler])
                }
 
 -- | initializes Freenet subsystem
@@ -55,17 +58,20 @@ offer fn df = do
 
   -- inform other registered handlers
   m <- readTVar (fnRequests fn)
-  mapM_ (\(DataHandler bucket) -> putTMVar bucket (Right df)) $ Map.lookupDefault [] key m
+  inform $ Map.lookup key m
   modifyTVar (fnRequests fn) (Map.delete key)
   where
     key = FD.dataFoundLocation df
-    
--- FIXME: we cannot unregister handlers
+    inform Nothing = return ()
+    inform (Just dhs) = mapM_ (\(DataHandler bucket) -> putTMVar bucket (Right df)) dhs
+
 addHandler :: Freenet -> Key -> DataHandler -> STM ()
 addHandler fn key dh = modifyTVar (fnRequests fn) $ Map.insertWith (++) key [dh]
 
 removeHandler :: Freenet -> Key -> DataHandler -> STM ()
-removeHandler = error "removeHandler"
+removeHandler fn key dh = modifyTVar (fnRequests fn) $ Map.update u key where
+  u dhs = if null dhs' then Nothing else Just dhs' where
+    dhs' = filter (== dh) dhs
 
 -- | creates a dataHandler which will set it's bucket to Nothing after a timeout
 timeoutHandler :: Freenet -> Key -> IO DataHandler
@@ -85,7 +91,7 @@ timeoutHandler fn key = do
       then readTVar timeout >>= \to -> if to
                                        then putTMVar bucket (Left "timeout") >> removeHandler fn key dh
                                        else retry
-      else return ()
+      else removeHandler fn key dh
     
   return dh
   
@@ -98,10 +104,52 @@ handleRequest fn dr = do
     Nothing -> case fnCompanion fn of
       Nothing -> return ()
       Just c  -> FC.getData c dr
-      
-fetchUri :: Freenet -> FU.URI -> IO (Either T.Text BS.ByteString)
+
+fetchRedirect :: Freenet -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
+fetchRedirect fn (SplitFile comp segs) = do
+  let
+    -- TODO: use FEC check blocks as well
+    segUris = catMaybes $ map (\(SplitFileSegment uri isd) -> if isd then Just uri else Nothing) segs
+
+  -- register data handlers
+  dhs <- mapM (\uri -> timeoutHandler fn $ FU.uriLocation uri) segUris
+  
+  -- schedule requests
+  mapM_ (\uri -> print uri >> (handleRequest fn $ FU.toDataRequest uri)) segUris
+  
+  -- wait for data to arrive (or timeout)
+  ds <- mapM (\(DataHandler bucket) -> atomically $ takeTMVar bucket) dhs
+  
+  -- see if everything could be fetched and try to decrypt
+  let
+    keys = map FU.chkKey segUris
+    dec (Left e)   _   = Left e
+    dec (Right df) key = FD.decryptDataFound key df
+    ps = map (\(mdf, key) -> dec mdf key) $ zip ds keys
+    (es, bs) = partitionEithers ps
+
+  return $ if null es
+           then Right $ BSL.fromChunks bs
+           else Left $ T.intercalate ", " es
+
+fetchDocument
+  :: Freenet
+  -> BS.ByteString
+  -> IO (Either T.Text BSL.ByteString)
+fetchDocument fn plain = case parseMetadata plain of
+  Left e -> return $ Left e
+  Right (SimpleRedirect _ r) -> fetchRedirect fn r -- TODO: check hash(es)
+
+-- |
+-- Tries to fetch the specified URI, possibly parsed metadata if it's
+-- a control document, goes on fetching the referenced data if it was
+-- and finally returns everything
+fetchUri :: Freenet -> FU.URI -> IO (Either T.Text BSL.ByteString)
 fetchUri fn uri = do
-  let dr = FU.toDataRequest uri
+  let
+    dr = FU.toDataRequest uri
+    key = FU.chkKey uri
+
   (DataHandler bucket) <- timeoutHandler fn $ FU.uriLocation uri
   handleRequest fn dr
   
@@ -109,10 +157,8 @@ fetchUri fn uri = do
   
   case df of
     Left e  -> return $ Left e
-    Right d -> do
-      case FD.decryptDataFound (FU.chkKey uri) d of
-        Left decError -> return $ Left decError
-        Right plain   -> case MD.parseMetadata plain of
-          Left e   -> return $ Left e
-          Right md -> return (Right plain)
-  
+    Right d -> case FD.decryptDataFound key d of
+      Left e          -> return $ Left e
+      Right plaintext -> if FU.isControlDocument uri
+                         then fetchDocument fn plaintext
+                         else return $ Right (BSL.fromStrict plaintext)

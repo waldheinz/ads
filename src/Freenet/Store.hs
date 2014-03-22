@@ -3,7 +3,7 @@ module Freenet.Store (
   FileStore, mkFileStore, putData, getData
   ) where
 
-import Control.Concurrent ( forkIO )
+import Control.Concurrent ( forkIO, ThreadId )
 import Control.Concurrent.STM
 import Control.Monad ( forever, void, when )
 import Data.Binary
@@ -24,6 +24,7 @@ data FileStore = FS
                  { _blockCount :: Int
                  , writeQueue :: TBQueue StoreRequest
                  , _chkStore   :: Handle
+                 , fsTid :: ThreadId
                  }
 
 mkFileStore
@@ -31,7 +32,7 @@ mkFileStore
   -> FilePath         -- ^ directory holding the store
   -> IO FileStore
 mkFileStore count dir = do
-  wq <- newTBQueueIO 10
+  wq <- newTBQueueIO 20
 
   let
     chkSize = 32837
@@ -41,7 +42,7 @@ mkFileStore count dir = do
   hSetFileSize chkHandle $ fromIntegral chkFileSize
   
   -- dispatch write requests to the file(s)
-  void $ forkIO $ forever $ do
+  tid <- forkIO $ forever $ do
     req <- atomically $ readTBQueue wq
     
     let
@@ -84,7 +85,7 @@ mkFileStore count dir = do
       WriteRequest df                     -> write df offsets 
       ReadRequest (ChkRequest key _) buck -> handleRead offsets key buck
     
-  return $ FS count wq chkHandle
+  return $ FS count wq chkHandle tid
   
 putData :: FileStore -> DataFound -> STM ()
 putData fs df = writeTBQueue (writeQueue fs) (WriteRequest df)
