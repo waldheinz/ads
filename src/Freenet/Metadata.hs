@@ -29,8 +29,6 @@ import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8' )
 
-import Debug.Trace
-
 import Freenet.Mime
 import Freenet.Types
 import Freenet.URI
@@ -277,10 +275,10 @@ getKey flags =
   then do
     -- full keys
     kl <- getWord16be
-    kb <- traceShow kl $ getLazyByteString $ fromIntegral kl
+    kb <- getLazyByteString $ fromIntegral kl
     
     case decodeOrFail kb of
-      Left  (_, _, e) -> traceShow kb $ fail $ "error reading full key:" ++ e
+      Left  (_, _, e) -> fail $ "error reading full key:" ++ e
       Right (_, _, k) -> return k
       
   else do
@@ -298,7 +296,7 @@ getManifestEntry = do
     Left e     -> fail $ "invalid UTF8 in entry name " ++ show e
     Right name -> do
       mLen <- getWord16be
-      mBytes <- traceShow ("allow", mLen) $ getLazyByteString (fromIntegral mLen)
+      mBytes <- getLazyByteString (fromIntegral mLen)
       case decodeOrFail mBytes of
         Left  (_, _, e) -> fail $ "error parsing manifest entry \"" ++ T.unpack name ++ "\": " ++ e
         Right (_, _, m) -> return (name, m)
@@ -306,7 +304,7 @@ getManifestEntry = do
 getSimpleManifest :: Get Metadata
 getSimpleManifest = do
   entryCount <- getWord32be
-  entries <- replicateM (fromIntegral entryCount) $ getManifestEntry >>= (\e -> traceShow e $ return e)
+  entries <- replicateM (fromIntegral entryCount) getManifestEntry
   return $ Manifest entries
 
 getSimpleRedirect :: Version -> Get Metadata
@@ -324,12 +322,12 @@ getSimpleRedirect v = do
   when (flagSet flags (flagBit Dbr)) $ fail "unsupported dbr flag set"
   when (flagSet flags (flagBit ExtraMetadata)) $ fail "unsupported extraMetadata flag set"
   
-  target <- traceShow ("flags", flags) $ if flagSet flags (flagBit FlagSplitFile)
+  target <- if flagSet flags (flagBit FlagSplitFile)
             then getSplitFile flags (deriveCryptoKey hashes)
             else do
               -- unless (flags == 40) $ fail $ "unsupported flags for key redirect " ++ show flags
               mime <- getMime flags
-              traceShow (mime) $ RedirectKey mime <$> getKey flags
+              RedirectKey mime <$> getKey flags
                  
   return $! SimpleRedirect hashes target 
 
