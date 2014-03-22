@@ -39,7 +39,7 @@ initFn :: CFG.Config -> IO Freenet
 initFn cfg = do
   -- datastore
   dsdir <- CFG.require cfg "datastore"
-  chkStore <- FS.mkFileStore 1024 dsdir
+  chkStore <- FS.mkFileStore (1024 * 16) dsdir
   reqs <- newTVarIO Map.empty
   
   let fn = FN chkStore Nothing reqs
@@ -108,6 +108,7 @@ handleRequest fn dr = do
       Just c  -> FC.getData c dr
 
 fetchRedirect :: Freenet -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
+fetchRedirect fn (RedirectKey mime uri) = fetchUri fn uri
 fetchRedirect fn (SplitFile comp dlen olen segs _) = do -- TODO: we're not returning the MIME
   let
     -- TODO: use FEC check blocks as well
@@ -150,6 +151,7 @@ resolvePath fn (p:ps) (Manifest es) = print (p, es) >> case lookup p es of
   Nothing -> return $ Left $ "could not find path in manifest: " `T.append` p
   Just md -> resolvePath fn ps md
 
+
 resolvePath fn ps (ArchiveManifest uri _ TAR _) = do
   archive <- fetchUri fn uri
   
@@ -175,7 +177,7 @@ resolvePath fn ps (ArchiveManifest uri _ TAR _) = do
 --  return $ Left "am"
 
 resolvePath _ [] (SimpleRedirect _ tgt) = return $ Right tgt -- we're done
-
+resolvePath _ [] (SymbolicShortlink tgt) = return $ Left tgt
 resolvePath _ ps md = return $ Left $ T.concat ["cannot locate ", T.pack (show ps), " in ", T.pack (show md)]
 
 -- |
