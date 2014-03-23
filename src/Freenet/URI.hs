@@ -17,6 +17,7 @@ import Data.Binary.Put
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Builder as BSB
+import Data.Digest.Pure.SHA
 import Data.Monoid
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8' )
@@ -26,17 +27,17 @@ import Freenet.Types
 
 data URI
      = CHK
-       { chkLocation :: Key      -- ^ the routing key
-       , chkKey      :: Key      -- ^ the crypto key
-       , chkExtra    :: ChkExtra -- ^ extra data about algorithms used, always 5 bytes
-       , chkPath     :: [T.Text] -- ^ the path, already split at "/" chars
+       { chkLocation   :: Key      -- ^ the routing key
+       , chkKey        :: Key      -- ^ the crypto key
+       , chkExtra      :: ChkExtra -- ^ extra data about algorithms used, always 5 bytes
+       , chkPath       :: [T.Text] -- ^ the path, already split at "/" chars
        }
      | SSK
-       { sskLocation :: Key
-       , sskKey      :: Key
-       , sskExtra    :: SskExtra
-       , sskDocName  :: T.Text
-       , sskPath     :: [T.Text]
+       { sskPubKeyHash :: Key      -- ^ the hash of the public key 
+       , sskKey        :: Key      -- ^ the crypto key which allows to decrypt the payload
+       , sskExtra      :: SskExtra -- ^ extra information about used algorithms and document type
+       , sskDocName    :: T.Text   -- ^ the document name, which is the mandatory first path element
+       , sskPath       :: [T.Text] -- ^ the remainder of the path
        }
 
 instance Show URI where
@@ -51,7 +52,7 @@ getUTF8 = do
   len <- getWord16be
   bs <- getByteString $ fromIntegral len
   case decodeUtf8' bs of
-    Left e  -> return "<XXX>" -- fail $ "error in getUTF8: " ++ show e
+    Left e  -> fail $ "error in getUTF8: " ++ show e
     Right t -> return t
   
 instance Binary URI where
@@ -77,7 +78,26 @@ instance Binary URI where
 parseUri :: T.Text -> Either T.Text URI
 parseUri str = case T.take 4 str of
   "CHK@" -> parseChk (T.drop 4 str)
+  "SSK@" -> parseSsk (T.drop 4 str)
   _      -> Left $ T.concat ["cannot recognize URI type of \"", str, "\""]
+
+parseSsk :: T.Text -> Either T.Text URI
+parseSsk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') str' of
+  [rstr, cstr, estr] -> do
+    rk <- fromBase64' rstr >>= mkKey
+    ck <- fromBase64' cstr >>= mkKey
+    e <- fromBase64' estr >>= \eb -> if BS.length eb == 5
+                                     then Right $ eb
+                                     else Left "CHK extra data must be 5 bytes"
+    let
+      path' = T.drop 1 path
+      ps = if T.null path' then [] else  T.split (== '/') path'
+
+    -- for SSKs, the first path element is the docname and mandatory
+    if null ps
+      then Left "missing SSK document name"
+      else Right $ SSK rk ck (SskExtra e) (head ps) (tail ps)
+  _ -> Left $ T.concat $ ["expected 3 comma-separated parts in \"", str, "\""]
 
 parseChk :: T.Text -> Either T.Text URI
 parseChk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') str' of
@@ -96,6 +116,7 @@ parseChk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') s
 
 toDataRequest :: URI -> DataRequest
 toDataRequest (CHK loc _ e _) = ChkRequest loc $ chkExtraCrypto e
+toDataRequest (SSK loc _ e _ _) = SskRequest loc $ sskExtraCrypto e
 
 -- |
 -- Decides if an URI is expected to point to a metadata block
@@ -106,8 +127,11 @@ toDataRequest (CHK loc _ e _) = ChkRequest loc $ chkExtraCrypto e
 isControlDocument :: URI -> Bool
 isControlDocument (CHK _ _ e _) = chkExtraIsControl e
 
+-- |
+-- Determines the location (aka "routing key") for an URI.
 uriLocation :: URI -> Key
 uriLocation (CHK loc _ _ _) = loc
+uriLocation (SSK hpk _ _ doc _) = sskLocation hpk doc
 
 uriPath :: URI -> [T.Text]
 uriPath (CHK _ _ _ p) = p
@@ -155,3 +179,20 @@ instance Show SskExtra where
 instance Binary SskExtra where
   put (SskExtra bs) = putByteString bs
   get = SskExtra <$> getByteString 5
+
+-- |
+-- extracts the crypto algorithm from SSK extra data,
+-- which is at (zero based) index 2
+sskExtraCrypto :: SskExtra -> Word8
+sskExtraCrypto se = BS.index (unSskExtra se) 2
+
+-- |
+-- for SSKs, the routing key is determined by
+-- H(PK) and the encrypted document name's hash E(H(docname))
+sskLocation
+  :: Key    -- ^ the public key hash
+  -> T.Text -- ^ the document name
+  -> Key    -- ^ the resulting routing key
+sskLocation hpk docname = mkKey' $ BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [ehd, unKey hpk] where
+  ehd = error "need rijndael to encrypt docname"
+  

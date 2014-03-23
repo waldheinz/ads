@@ -47,10 +47,12 @@ mkKey' bs
 
 data DataRequest
    = ChkRequest Key Word8 -- ^ the location and the hash algorithm so it can be verified
+   | SskRequest Key Word8
    deriving ( Show )
 
 dataRequestLocation :: DataRequest -> Key
 dataRequestLocation (ChkRequest k _) = k
+dataRequestLocation (SskRequest k _) = k
 
 ----------------------------------------------------------------
 -- store related

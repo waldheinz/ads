@@ -113,3 +113,4 @@ getData fs dr@(ChkRequest _ _) = do
   bucket <- newEmptyTMVarIO
   atomically $ writeTBQueue (sfReqs $ fsChk fs) (ReadRequest dr bucket)
   atomically $ takeTMVar bucket
+getData _ dr = print ("cannot getData " ++ show dr) >> return Nothing
