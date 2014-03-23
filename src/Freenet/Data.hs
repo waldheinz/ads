@@ -69,7 +69,15 @@ chkHeaderCipherLen = BS.drop 34 . unChkHeader
 -- SSK data
 --------------------------------------------------------------------------------
 
--- | the header required to verify a CHK data block
+-- |
+-- the header of an SSK data block, consisting of:
+--    0  word16     : hash algorithm, must be SHA256
+--    2  word16     : symmetric cipher identifier
+--    4  32 bytes   : E(H(docname))
+--   36  36 bytes   : encrypted part of the headers
+--   72  32 bytes   : signature parameter R
+--  104  32 bytes   : signature parameter S
+--  136             : bytes total length
 newtype SskHeader = SskHeader { unSskHeader :: BS.ByteString } deriving ( Eq )
 
 sskHeaderSize :: Int
