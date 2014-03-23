@@ -8,7 +8,7 @@ module Freenet.Data (
   chkHeaderHash, chkHeaderCipherLen,
 
   -- * SSKs
-  SskHeader, mkSskHeader,
+  SskHeader, mkSskHeader, sskDataSize, sskHeaderSize,
   
   -- * requesting data
   DataRequest(..), toDataRequest, dataRequestLocation,
@@ -30,6 +30,7 @@ import Data.Digest.Pure.SHA
 import qualified Data.Text as T
 
 import Freenet.Base64
+import Freenet.Pcfb
 import Freenet.Types
 import Freenet.URI
 
@@ -65,7 +66,7 @@ chkHeaderCipherLen :: ChkHeader -> BS.ByteString
 chkHeaderCipherLen = BS.drop 34 . unChkHeader
 
 --------------------------------------------------------------------------------
--- SSK headers
+-- SSK data
 --------------------------------------------------------------------------------
 
 -- | the header required to verify a CHK data block
@@ -73,6 +74,10 @@ newtype SskHeader = SskHeader { unSskHeader :: BS.ByteString } deriving ( Eq )
 
 sskHeaderSize :: Int
 sskHeaderSize = 136
+
+-- | size of the SSK payload
+sskDataSize :: Int
+sskDataSize = 1024
 
 instance Show SskHeader where
   show (SskHeader bs) = T.unpack $ toBase64' bs
@@ -85,17 +90,8 @@ mkSskHeader :: BS.ByteString -> Either T.Text SskHeader
 mkSskHeader bs
   | BS.length bs == sskHeaderSize = Right $ SskHeader bs
   | otherwise = Left $ "SSK header length must be 136 bytes, got " `T.append` T.pack (show $ BS.length bs)
-                
-{-
-chkHeaderHash :: ChkHeader -> BS.ByteString
-chkHeaderHash = BS.take 32 . BS.drop 2 . unChkHeader
 
--- |
--- the length of the CHK plaintext is stored encrypted
--- in it's header, and this function extracts it. yup.
-chkHeaderCipherLen :: ChkHeader -> BS.ByteString
-chkHeaderCipherLen = BS.drop 34 . unChkHeader
--}
+
 
 --------------------------------------------------------------------------------
 -- found data
@@ -110,24 +106,7 @@ instance Show DataFound where
   show (ChkFound k h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
   show (SskFound k h d) = "SskFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
   
-{-
-instance Binary DataFound where
-  put (ChkFound k h d) = put (1 :: Word8) >> put k >> put h >> putByteString d
-
-  get = do
-    t <- get :: Get Word8
-    case t of
-      1 -> do
-        (k, h, d) <- (,,) <$> get <*> get <*> getByteString 32768
-        case mkChkFound k h d of
-          Right df -> return df
-          Left e   -> fail $ T.unpack e
-      _ -> fail $ "unknown type " ++ show t
--}
-
 instance StorePersistable DataFound where
---  storePersistSize (ChkFound _ _ _) = 32 + 32 + 32768
-  
   storePersistFile (ChkFound _ _ _) = "store-chk"
   storePersistFile (SskFound _ _ _) = "store-ssk"
   
@@ -139,12 +118,18 @@ instance StorePersistable DataFound where
     case mkChkFound k h d of
       Right df -> return df
       Left e   -> fail $ T.unpack e
+      
+  storePersistGet "store-ssk" = do
+    (k, h, d) <- (,,) <$> get <*> get <*> getByteString sskDataSize
+    case mkSskFound k h d of
+      Right df -> return df
+      Left e   -> fail $ T.unpack e
   
   storePersistGet name = fail $ "unknown store: " ++ name
   
-    -- | find the routing key for a DataFound
+-- | find the routing key for a DataFound
 dataFoundLocation :: DataFound -> Key
-dataFoundLocation (ChkFound k _ _) = k -- mkKey' $ BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
+dataFoundLocation (ChkFound k _ _) = k
 dataFoundLocation (SskFound k _ _) = k
 
 mkChkFound :: Key -> ChkHeader -> BS.ByteString -> Either T.Text DataFound

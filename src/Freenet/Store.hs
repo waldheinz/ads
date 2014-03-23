@@ -99,7 +99,7 @@ mkFileStore
   -> IO FileStore
 mkFileStore count dir = do
   chk <- mkStoreFile dir count (32 + 36 + 32768) "store-chk"
-  ssk <- mkStoreFile dir count (123) "store-ssk"
+  ssk <- mkStoreFile dir count (32 + sskHeaderSize + sskDataSize) "store-ssk"
   
   return $ FS count dir chk ssk
   

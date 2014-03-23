@@ -48,7 +48,6 @@ mkKey' bs
 ----------------------------------------------------------------
 
 class StorePersistable a where
-  storePersistSize :: a -> Int
   storePersistFile :: a -> String
   storePersistPut  :: a -> Put
   storePersistGet  :: String -> Get a -- ^ given a filename, get the data

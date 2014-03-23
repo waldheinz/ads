@@ -43,6 +43,7 @@ executable ads
     text                 >= 0.11,
     transformers         >= 0.3,
     unordered-containers >= 0.2,
+    vector               >= 0.10,
     wai                  >= 2.1,
     warp                 >= 2.1,
     zlib                 >= 0.5
