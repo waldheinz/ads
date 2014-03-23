@@ -4,15 +4,12 @@
 module Main ( main ) where
 
 import Control.Concurrent.STM
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
-import qualified Data.Text as T
 import Network ( withSocketsDo )
 import Network.Wai.Handler.Warp as Warp
 
 import Freenet as FN
 import Freenet.Fproxy as FP
-import Freenet.URI as FU
 import Logging as LOG
 import Net
 import Node as N

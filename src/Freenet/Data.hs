@@ -53,7 +53,10 @@ chkHeaderCipherLen = BS.drop 34 . unChkHeader
 data DataFound
    = ChkFound !Key !ChkHeader !BS.ByteString -- headers and data
    deriving ( Eq )
-            
+
+instance Show DataFound where
+  show (ChkFound k h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
+
 instance Binary DataFound where
   put (ChkFound k h d) = put (1 :: Word8) >> put k >> put h >> putByteString d
 
@@ -67,15 +70,21 @@ instance Binary DataFound where
           Left e   -> fail $ T.unpack e
       _ -> fail $ "unknown type " ++ show t
 
---dataFoundPayload :: DataFound -> BSL.ByteString
---dataFoundPayload (ChkFound _ h d) = (encode h) `BSL.append` (BSL.fromStrict d)
-
--- | find the routing key for a DataFound
+instance StorePersistable DataFound where
+  storePersistSize (ChkFound _ _ _) = 32 + 32 + 32768
+  storePersistFile (ChkFound _ _ _) = "store-chk"
+  storePersistPut  (ChkFound k h d) = put k >> put h >> putByteString d
+  storePersistGet "store-chk" = do
+    (k, h, d) <- (,,) <$> get <*> get <*> getByteString 32768
+    case mkChkFound k h d of
+      Right df -> return df
+      Left e   -> fail $ T.unpack e
+  
+  storePersistGet name = fail $ "unknown store: " ++ name
+  
+    -- | find the routing key for a DataFound
 dataFoundLocation :: DataFound -> Key
 dataFoundLocation (ChkFound k _ _) = k -- mkKey' $ BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
-     
-instance Show DataFound where
-  show (ChkFound k h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
 
 mkChkFound :: Key -> ChkHeader -> BS.ByteString -> Either T.Text DataFound
 mkChkFound k h d

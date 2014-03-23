@@ -14,7 +14,8 @@ cabal-version:       >=1.10
 
 executable ads
   main-is:             Main.hs
-  ghc-options:         -Wall -threaded -debug
+  ghc-options:         -Wall -threaded
+  -- -debug
   -- other-modules:       
   -- other-extensions:    
   build-depends:

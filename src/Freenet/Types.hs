@@ -4,7 +4,10 @@
 module Freenet.Types (
   Key(..), mkKey, mkKey',
   
-  DataRequest(..)
+  DataRequest(..), dataRequestLocation,
+
+  -- * things that go to the store
+  StorePersistable(..)
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -46,3 +49,16 @@ data DataRequest
    = ChkRequest Key Word8 -- ^ the location and the hash algorithm so it can be verified
    deriving ( Show )
 
+dataRequestLocation :: DataRequest -> Key
+dataRequestLocation (ChkRequest k _) = k
+
+----------------------------------------------------------------
+-- store related
+----------------------------------------------------------------
+
+class StorePersistable a where
+  storePersistSize :: a -> Int
+  storePersistFile :: a -> String
+  storePersistPut  :: a -> Put
+  storePersistGet  :: String -> Get a -- ^ given a filename, get the data
+  
