@@ -7,11 +7,14 @@ module Freenet.Data (
   ChkHeader, mkChkHeader, unChkHeader,
   chkHeaderHash, chkHeaderCipherLen,
 
+  -- * SSKs
+  SskHeader, mkSskHeader,
+  
   -- * requesting data
   DataRequest(..), toDataRequest, dataRequestLocation,
   
   -- * Successfully retrieved data
-  DataFound, mkChkFound, dataFoundLocation,
+  DataFound, mkChkFound, mkSskFound, dataFoundLocation,
   decryptDataFound
   ) where
 
@@ -29,6 +32,10 @@ import qualified Data.Text as T
 import Freenet.Base64
 import Freenet.Types
 import Freenet.URI
+
+------------------------------------------------------------------------------
+-- CHK headers
+------------------------------------------------------------------------------
 
 -- | the header required to verify a CHK data block
 newtype ChkHeader = ChkHeader { unChkHeader :: BS.ByteString } deriving ( Eq )
@@ -51,16 +58,59 @@ mkChkHeader bs
 chkHeaderHash :: ChkHeader -> BS.ByteString
 chkHeaderHash = BS.take 32 . BS.drop 2 . unChkHeader
 
+-- |
+-- the length of the CHK plaintext is stored encrypted
+-- in it's header, and this function extracts it. yup.
 chkHeaderCipherLen :: ChkHeader -> BS.ByteString
 chkHeaderCipherLen = BS.drop 34 . unChkHeader
 
+--------------------------------------------------------------------------------
+-- SSK headers
+--------------------------------------------------------------------------------
+
+-- | the header required to verify a CHK data block
+newtype SskHeader = SskHeader { unSskHeader :: BS.ByteString } deriving ( Eq )
+
+sskHeaderSize :: Int
+sskHeaderSize = 136
+
+instance Show SskHeader where
+  show (SskHeader bs) = T.unpack $ toBase64' bs
+
+instance Binary SskHeader where
+  put (SskHeader h) = putByteString h
+  get = SskHeader <$> getByteString sskHeaderSize
+
+mkSskHeader :: BS.ByteString -> Either T.Text SskHeader
+mkSskHeader bs
+  | BS.length bs == sskHeaderSize = Right $ SskHeader bs
+  | otherwise = Left $ "SSK header length must be 136 bytes, got " `T.append` T.pack (show $ BS.length bs)
+                
+{-
+chkHeaderHash :: ChkHeader -> BS.ByteString
+chkHeaderHash = BS.take 32 . BS.drop 2 . unChkHeader
+
+-- |
+-- the length of the CHK plaintext is stored encrypted
+-- in it's header, and this function extracts it. yup.
+chkHeaderCipherLen :: ChkHeader -> BS.ByteString
+chkHeaderCipherLen = BS.drop 34 . unChkHeader
+-}
+
+--------------------------------------------------------------------------------
+-- found data
+--------------------------------------------------------------------------------
+
 data DataFound
-   = ChkFound !Key !ChkHeader !BS.ByteString -- headers and data
+   = ChkFound !Key !ChkHeader !BS.ByteString -- location, headers and data
+   | SskFound !Key !SskHeader !BS.ByteString -- location, headers and data
    deriving ( Eq )
 
 instance Show DataFound where
   show (ChkFound k h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
-
+  show (SskFound k h d) = "SskFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
+  
+{-
 instance Binary DataFound where
   put (ChkFound k h d) = put (1 :: Word8) >> put k >> put h >> putByteString d
 
@@ -73,11 +123,17 @@ instance Binary DataFound where
           Right df -> return df
           Left e   -> fail $ T.unpack e
       _ -> fail $ "unknown type " ++ show t
+-}
 
 instance StorePersistable DataFound where
-  storePersistSize (ChkFound _ _ _) = 32 + 32 + 32768
+--  storePersistSize (ChkFound _ _ _) = 32 + 32 + 32768
+  
   storePersistFile (ChkFound _ _ _) = "store-chk"
+  storePersistFile (SskFound _ _ _) = "store-ssk"
+  
   storePersistPut  (ChkFound k h d) = put k >> put h >> putByteString d
+  storePersistPut  (SskFound k h d) = put k >> put h >> putByteString d
+  
   storePersistGet "store-chk" = do
     (k, h, d) <- (,,) <$> get <*> get <*> getByteString 32768
     case mkChkFound k h d of
@@ -89,6 +145,7 @@ instance StorePersistable DataFound where
     -- | find the routing key for a DataFound
 dataFoundLocation :: DataFound -> Key
 dataFoundLocation (ChkFound k _ _) = k -- mkKey' $ BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
+dataFoundLocation (SskFound k _ _) = k
 
 mkChkFound :: Key -> ChkHeader -> BS.ByteString -> Either T.Text DataFound
 mkChkFound k h d
@@ -96,6 +153,10 @@ mkChkFound k h d
   | otherwise = Left "hash mismatch"
   where
     hash = bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
+
+mkSskFound :: Key -> SskHeader -> BS.ByteString -> Either T.Text DataFound
+mkSskFound k h d
+  | otherwise = Right $ SskFound k h d
 
 -- |
 -- given the secret crypto key (second part of URIs), an data found can be

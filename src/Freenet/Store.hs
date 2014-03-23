@@ -90,6 +90,7 @@ data FileStore = FS
                  { _blockCount :: ! Int
                  , fsDir       :: ! FilePath
                  , fsChk       :: ! StoreFile
+                 , fsSsk       :: ! StoreFile
                  }
 
 mkFileStore
@@ -98,12 +99,15 @@ mkFileStore
   -> IO FileStore
 mkFileStore count dir = do
   chk <- mkStoreFile dir count (32 + 36 + 32768) "store-chk"
-  return $ FS count dir chk
+  ssk <- mkStoreFile dir count (123) "store-ssk"
+  
+  return $ FS count dir chk ssk
   
 putData :: FileStore -> DataFound -> STM ()
 putData fs df = do
   let sf = case storePersistFile df of
         "store-chk" -> fsChk fs
+        "store-ssk" -> fsSsk fs
         x           -> error $ "no store for " ++ x
 
   writeTBQueue (sfReqs sf) (WriteRequest df)

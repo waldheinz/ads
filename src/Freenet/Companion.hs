@@ -56,7 +56,23 @@ initCompanion cfg dfHandler = do
         case df of
           Left e  -> putStrLn $ "could not parse CHK found response: " ++ T.unpack e
           Right d -> atomically $ dfHandler d
-              
+
+      "ssk" -> do
+        let 
+          (ktxt, rest) = breakSpace args
+          (_, rest') = breakSpace rest
+          (hstr, rest'') = breakSpace rest'
+          (dstr, _) = breakSpace rest''
+          df = do
+            key <- fromBase64' ktxt >>= mkKey
+            hdr <- fromBase64' hstr >>= mkSskHeader
+            d <- fromBase64' dstr
+            mkSskFound key hdr d
+
+        case df of
+          Left e  -> putStrLn $ "could not parse SSK found response: " ++ T.unpack e
+          Right d -> atomically $ dfHandler d
+          
       x -> print $ "strange companion response " ++ T.unpack x
   
   return $ Companion handle
