@@ -9,7 +9,7 @@ import qualified Codec.Archive.Tar as TAR
 import qualified Codec.Compression.GZip as Gzip
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
-import Control.Monad ( void )
+import Control.Monad ( void, when )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
@@ -50,13 +50,13 @@ initFn cfg = do
   case chost of
     Nothing -> return fn
     Just _  -> do
-      comp <- FC.initCompanion ccfg (offer fn)
+      comp <- FC.initCompanion ccfg (offer fn True)
       return $ fn { fnCompanion = Just comp }
 
-offer :: Freenet -> FD.DataFound -> STM ()
-offer fn df = do
+offer :: Freenet -> Bool -> FD.DataFound -> STM ()
+offer fn toStore df = do
   -- write to our store
-  FS.putData (fnStore fn) df
+  when toStore $ FS.putData (fnStore fn) df
 
   -- inform other registered handlers
   m <- readTVar (fnRequests fn)
@@ -102,7 +102,7 @@ handleRequest fn dr = do
   fromStore <- FS.getData (fnStore fn) dr
   
   case fromStore of
-    Just df -> atomically $ offer fn df
+    Just df -> atomically $ offer fn False df
     Nothing -> case fnCompanion fn of
       Nothing -> return ()
       Just c  -> FC.getData c dr
