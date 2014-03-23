@@ -7,6 +7,9 @@ module Freenet.Data (
   ChkHeader, mkChkHeader, unChkHeader,
   chkHeaderHash, chkHeaderCipherLen,
 
+  -- * requesting data
+  DataRequest(..), toDataRequest, dataRequestLocation,
+  
   -- * Successfully retrieved data
   DataFound, mkChkFound, dataFoundLocation,
   decryptDataFound
@@ -25,6 +28,7 @@ import qualified Data.Text as T
 
 import Freenet.Base64
 import Freenet.Types
+import Freenet.URI
 
 -- | the header required to verify a CHK data block
 newtype ChkHeader = ChkHeader { unChkHeader :: BS.ByteString } deriving ( Eq )
@@ -114,3 +118,20 @@ decryptDataFound key (ChkFound _ header ciphertext)
     len = fromIntegral $ runGet getWord16be $ fromStrict lenbytes
     plaintext = BS.take len plaintext'
     mac = bytestringDigest (hmacSha256 (fromStrict $ unKey key) (fromStrict plaintext''))
+
+-------------------------------------------------------------------------------
+-- requesting data
+-------------------------------------------------------------------------------
+
+data DataRequest
+   = ChkRequest Key Word8     -- ^ the location and the hash algorithm so it can be verified
+   | SskRequest Key Key Word8 -- ^ the pubkey hash, encrypted.hashed docname and algoritms
+   deriving ( Show )
+
+dataRequestLocation :: DataRequest -> Key
+dataRequestLocation (ChkRequest k _) = k
+dataRequestLocation (SskRequest hpk ehd _) = sskLocation hpk ehd
+
+toDataRequest :: URI -> DataRequest
+toDataRequest (CHK loc _ e _) = ChkRequest loc $ chkExtraCrypto e
+toDataRequest (SSK hpk ck e doc _) = SskRequest hpk (sskEncryptDocname ck doc) (sskExtraCrypto e)

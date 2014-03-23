@@ -10,7 +10,6 @@ import qualified Codec.Compression.GZip as Gzip
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
 import Control.Monad ( void, when )
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
@@ -20,13 +19,13 @@ import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 
 import qualified Freenet.Companion as FC
-import qualified Freenet.Data as FD
+import Freenet.Data
 import Freenet.Metadata
 import qualified Freenet.Store as FS
 import Freenet.Types
 import qualified Freenet.URI as FU
 
-newtype DataHandler = DataHandler (TMVar (Either T.Text FD.DataFound)) deriving ( Eq )
+newtype DataHandler = DataHandler (TMVar (Either T.Text DataFound)) deriving ( Eq )
 
 data Freenet = FN
                { fnStore     :: FS.FileStore
@@ -53,7 +52,7 @@ initFn cfg = do
       comp <- FC.initCompanion ccfg (offer fn True)
       return $ fn { fnCompanion = Just comp }
 
-offer :: Freenet -> Bool -> FD.DataFound -> STM ()
+offer :: Freenet -> Bool -> DataFound -> STM ()
 offer fn toStore df = do
   -- write to our store
   when toStore $ FS.putData (fnStore fn) df
@@ -63,7 +62,7 @@ offer fn toStore df = do
   inform $ Map.lookup key m
   modifyTVar (fnRequests fn) (Map.delete key)
   where
-    key = FD.dataFoundLocation df
+    key = dataFoundLocation df
     inform Nothing = return ()
     inform (Just dhs) = mapM_ (\(DataHandler bucket) -> putTMVar bucket (Right df)) dhs
 
@@ -108,7 +107,7 @@ handleRequest fn dr = do
       Just c  -> FC.getData c dr
 
 fetchRedirect :: Freenet -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
-fetchRedirect fn (RedirectKey mime uri) = fetchUri fn uri
+fetchRedirect fn (RedirectKey _ uri) = fetchUri fn uri
 fetchRedirect fn (SplitFile comp dlen olen segs _) = do -- TODO: we're not returning the MIME
   let
     -- TODO: use FEC check blocks as well
@@ -118,7 +117,7 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) = do -- TODO: we're not retur
   dhs <- mapM (\uri -> timeoutHandler fn $ FU.uriLocation uri) segUris
   
   -- schedule requests
-  mapM_ (\uri -> print uri >> (handleRequest fn $ FU.toDataRequest uri)) segUris
+  mapM_ (\uri -> print uri >> (handleRequest fn $ toDataRequest uri)) segUris
   
   -- wait for data to arrive (or timeout)
   ds <- mapM (\(DataHandler bucket) -> atomically $ takeTMVar bucket) dhs
@@ -127,7 +126,7 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) = do -- TODO: we're not retur
   let
     keys = map FU.chkKey segUris
     dec (Left e)   _   = Left e
-    dec (Right df) key = FD.decryptDataFound key df
+    dec (Right df) key = decryptDataFound key df
     ps = map (\(mdf, key) -> dec mdf key) $ zip ds keys
     (es, bs) = partitionEithers ps
 
@@ -161,14 +160,14 @@ resolvePath fn ps (ArchiveManifest uri _ TAR _) = do
       let
         -- locate the ".metadata" entry in the TAR archive. heavens, why do people do this?
         mec = TAR.foldEntries
-              (\e x -> case TAR.entryPath e of
+              (\e _ -> case TAR.entryPath e of
                   ".metadata" -> Just $ TAR.entryContent e
-                  x           -> Nothing)
+                  _           -> Nothing)
               Nothing
-              (\e -> Nothing) $ TAR.read bs
+              (\_ -> Nothing) $ TAR.read bs
       case mec of
-        Just (TAR.NormalFile bs sz) -> do
-          case parseMetadata (BSL.toStrict bs) of
+        Just (TAR.NormalFile tfc _) -> do
+          case parseMetadata (BSL.toStrict tfc) of
             Left e -> return $ Left $ "error parsing metadata from TAR archive: " `T.append` e
             Right md -> resolvePath fn ps md
         Just _ -> return $ Left "the .metadata entry is of unknown type"
@@ -187,7 +186,7 @@ resolvePath _ ps md = return $ Left $ T.concat ["cannot locate ", T.pack (show p
 fetchUri :: Freenet -> FU.URI -> IO (Either T.Text BSL.ByteString)
 fetchUri fn uri = do
   let
-    dr = FU.toDataRequest uri
+    dr = toDataRequest uri
     key = FU.chkKey uri
     path = FU.uriPath uri
   
@@ -197,7 +196,7 @@ fetchUri fn uri = do
   
   case df of
     Left e  -> return $ Left e
-    Right d -> case FD.decryptDataFound key d of
+    Right d -> case decryptDataFound key d of
       Left e          -> return $ Left e
       Right plaintext -> if FU.isControlDocument uri
                          then do

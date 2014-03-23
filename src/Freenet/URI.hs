@@ -2,11 +2,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet.URI (
-  URI(..), parseUri, toDataRequest, uriLocation,
+  URI(..), parseUri, uriLocation,
   isControlDocument, uriPath,
 
   -- * CHKs
-  ChkExtra, mkChkExtra
+  ChkExtra, mkChkExtra, chkExtraCrypto,
+
+  -- * SSKs
+  sskLocation, sskExtraCrypto, sskEncryptDocname
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -115,10 +118,6 @@ parseChk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') s
     return $ CHK rk ck (ChkExtra e) ps -- T.split (== '/') (T.drop 1 path)
   _ -> Left $ T.concat $ ["expected 3 comma-separated parts in \"", str, "\""]
 
-toDataRequest :: URI -> DataRequest
-toDataRequest (CHK loc _ e _) = ChkRequest loc $ chkExtraCrypto e
-toDataRequest (SSK loc _ e _ _) = SskRequest loc $ sskExtraCrypto e
-
 -- |
 -- Decides if an URI is expected to point to a metadata block
 -- (aka control document). This is usually the case for URIs
@@ -133,7 +132,7 @@ isControlDocument (SSK _ _ _ _ _) = True -- ^ to my knowledge, this is so
 -- Determines the location (aka "routing key") for an URI.
 uriLocation :: URI -> Key
 uriLocation (CHK loc _ _ _) = loc
-uriLocation (SSK hpk ck _ doc _) = sskLocation hpk ck doc
+uriLocation (SSK hpk ck _ doc _) = sskLocation' hpk ck doc
 
 uriPath :: URI -> [T.Text]
 uriPath (CHK _ _ _ p)   = p
@@ -192,17 +191,25 @@ sskExtraCrypto se = BS.index (unSskExtra se) 2
 -- |
 -- for SSKs, the routing key is determined by
 -- H(PK) and the encrypted document name's hash E(H(docname))
-sskLocation
+sskLocation'
   :: Key    -- ^ the public key hash
   -> Key    -- ^ the crypto key (required to encrypt the docname)
   -> T.Text -- ^ the document name
   -> Key    -- ^ the resulting routing key
-sskLocation hpk ckey docname = mkKey' $ BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unKey ehd, unKey hpk] where
+sskLocation' hpk ckey docname = sskLocation hpk ehd where
   ehd = sskEncryptDocname ckey docname
 
 -- |
--- encrypts an SSK document name. this is needed to determine
--- the location of an SSK document
+-- determines the location for a SSK document
+sskLocation
+  :: Key    -- ^ hash (public key)
+  -> Key    -- ^ encrypt ( hash ( docname ) )
+  -> Key    -- ^ routing key
+sskLocation hpk ehd = mkKey' $ BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unKey ehd, unKey hpk]
+
+-- |
+-- encrypts the hash of an SSK document name. this is needed
+-- to determine the location of an SSK document
 sskEncryptDocname
   :: Key    -- ^ the crypto key (second part of the SSK URI) 
   -> T.Text -- ^ the document name (first path element of SSK URI)

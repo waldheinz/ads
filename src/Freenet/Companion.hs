@@ -66,3 +66,6 @@ getData comp (ChkRequest k a) =
   let msg = T.intercalate " " ["getchk", toBase64' $ unKey k, T.pack $ show a, "\n"]
   in BS.hPut (cHandle comp) $ encodeUtf8 msg
   
+getData comp (SskRequest hpk ehd e) = BS.hPut (cHandle comp) $ encodeUtf8 msg where
+  msg = T.intercalate " " ["getssk", k hpk, k ehd, T.pack $ show e, "\n"]
+  k = toBase64' . unKey

@@ -4,8 +4,6 @@
 module Freenet.Types (
   Key(..), mkKey, mkKey',
   
-  DataRequest(..), dataRequestLocation,
-
   -- * things that go to the store
   StorePersistable(..)
   ) where
@@ -44,15 +42,6 @@ mkKey' :: BS.ByteString -> Key
 mkKey' bs
   | BS.length bs == keySize = Key bs
   | otherwise               = error "expected 32 bytes in mkKey"
-
-data DataRequest
-   = ChkRequest Key Word8 -- ^ the location and the hash algorithm so it can be verified
-   | SskRequest Key Word8
-   deriving ( Show )
-
-dataRequestLocation :: DataRequest -> Key
-dataRequestLocation (ChkRequest k _) = k
-dataRequestLocation (SskRequest k _) = k
 
 ----------------------------------------------------------------
 -- store related
