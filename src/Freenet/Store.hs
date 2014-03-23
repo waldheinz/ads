@@ -1,40 +1,59 @@
 
+{-# LANGUAGE MultiParamTypeClasses, RankNTypes #-}
+
 module Freenet.Store (
-  FileStore, mkFileStore, putData, getData
+  StoreFile, mkStoreFile, putData, getData,
+  
+  -- * things that go to the store
+  StorePersistable(..)
   ) where
 
 import Control.Concurrent ( forkIO, ThreadId )
 import Control.Concurrent.STM
-import Control.Monad ( forever, void, when )
+import Control.Monad ( forever )
 import Data.Binary
-import Data.Binary.Get ( ByteOffset, runGetOrFail )
+import Data.Binary.Get ( runGetOrFail )
 import Data.Binary.Put ( runPut )
 import qualified Data.ByteString.Lazy as BSL
 import Data.Hashable
-import System.FilePath
 import System.IO
 
-import Freenet.Data
 import Freenet.Types
 
-data StoreRequest
-     = ReadRequest DataRequest (TMVar (Maybe DataFound)) -- ^ the request and where to put the data when found
-     | WriteRequest DataFound                            -- ^ the data to put in the store
+----------------------------------------------------------------
+-- store types
+----------------------------------------------------------------
 
-data StoreFile = StoreFile
-                 { sfName   :: ! String
-                 , sfThread :: ! ThreadId
-                 , sfReqs   :: ! (TBQueue StoreRequest)
-                 , sfHandle :: ! Handle
-                 }
+data StorePersistable r f = SP
+                            { storeSize :: Int
+                            , storePut :: (DataFound f) => f -> Put
+                            , storeGet :: (DataRequest r, DataFound f) => r -> Get f
+                            }
+data StoreRequest r f
+     = ReadRequest  r (TMVar (Maybe f)) -- ^ the request and where to put the data when found
+     | WriteRequest f                   -- ^ the data to put in the store
 
-mkStoreFile :: FilePath -> Int -> Int -> String -> IO StoreFile
-mkStoreFile dir count entrySize storeName = do
+data StoreFile r f = StoreFile
+                     { _sfThread :: ! ThreadId
+                     , sfReqs    :: ! (TBQueue (StoreRequest r f))
+                     , _sfHandle :: ! Handle
+                     }
+
+mkStoreFile :: (DataRequest r, DataFound f) => StorePersistable r f -> FilePath -> Int -> IO (StoreFile r f)
+mkStoreFile sp fileName count = do
   rq <- newTBQueueIO 10
   
   let
+    entrySize = 1 + storeSize sp
+    doGet dr = do
+      flags <- getWord8
+      if flags == 1
+        then storeGet sp dr
+        else fail "empty slot"
+    doPut df    = putWord8 1 >> storePut sp df
+    isFree = getWord8 >>= (\flags -> return $ flags == 1)
+
     fileSize  = count * (fromIntegral entrySize)
-    fileName  = dir </> storeName
   
   handle <- openBinaryFile fileName ReadWriteMode
   hSetFileSize handle $ fromIntegral fileSize
@@ -54,7 +73,7 @@ mkStoreFile dir count entrySize storeName = do
         hSeek handle AbsoluteSeek o
         d <- BSL.hGet handle entrySize
         
-        case runGetOrFail (storePersistGet storeName) d of
+        case runGetOrFail (doGet dr) d of
           Left  (_, _, _)  -> (print $ "nothing to read at " ++ show o) >> go os
           Right (_, _, df) -> if loc == dataFoundLocation df
                               then print ("found read at " ++ show o) >> (atomically $ putTMVar bucket $ Just df)
@@ -66,16 +85,17 @@ mkStoreFile dir count entrySize storeName = do
       go []     = print "no free slots"
       go (o:os) = do
         hSeek handle AbsoluteSeek o
-        d <- BSL.hGet handle entrySize
-        case runGetOrFail (storePersistGet storeName) d of
-          Left (_, _, e) -> do
-            print $ "no valid data at " ++ show o ++ ": " ++ e
-            hSeek handle AbsoluteSeek o
-            BSL.hPut handle $ runPut $ storePersistPut df
-            print $ "written at " ++ show o
-          Right (_, _, df') -> if loc == dataFoundLocation df'
-                               then print "already there"
-                               else print "skip collision" >> go os
+        d <- BSL.hGet handle 1
+        case runGetOrFail isFree d of
+          Right (_, _, free) -> do
+            if free
+              then do
+--                print $ "no valid data at " ++ show o ++ ": " ++ e
+                hSeek handle AbsoluteSeek o
+                BSL.hPut handle $ runPut $ doPut df
+                print $ "written at " ++ show o
+              else go os
+          Left (_, _, e) -> error e
   
   tid <- forkIO $ forever $ do
     req <- atomically $ readTBQueue rq
@@ -84,37 +104,13 @@ mkStoreFile dir count entrySize storeName = do
       ReadRequest dr bucket -> doRead dr bucket
       WriteRequest df       -> doWrite df
 
-  return $ StoreFile storeName tid rq handle
+  return $ StoreFile tid rq handle
   
-data FileStore = FS
-                 { _blockCount :: ! Int
-                 , fsDir       :: ! FilePath
-                 , fsChk       :: ! StoreFile
-                 , fsSsk       :: ! StoreFile
-                 }
+putData :: DataFound f => StoreFile r f -> f -> STM ()
+putData sf df = writeTBQueue (sfReqs sf) (WriteRequest df)
 
-mkFileStore
-  :: Int              -- ^ number of elements the store can hold
-  -> FilePath         -- ^ directory holding the store
-  -> IO FileStore
-mkFileStore count dir = do
-  chk <- mkStoreFile dir count (32 + 36 + 32768) "store-chk"
-  ssk <- mkStoreFile dir count (32 + sskHeaderSize + sskDataSize) "store-ssk"
-  
-  return $ FS count dir chk ssk
-  
-putData :: FileStore -> DataFound -> STM ()
-putData fs df = do
-  let sf = case storePersistFile df of
-        "store-chk" -> fsChk fs
-        "store-ssk" -> fsSsk fs
-        x           -> error $ "no store for " ++ x
-
-  writeTBQueue (sfReqs sf) (WriteRequest df)
-  
-getData :: FileStore -> DataRequest -> IO (Maybe DataFound)
-getData fs dr@(ChkRequest _ _) = do
+getData :: (DataRequest r, DataFound f) => StoreFile r f -> r -> IO (Maybe f)
+getData fs dr = do
   bucket <- newEmptyTMVarIO
-  atomically $ writeTBQueue (sfReqs $ fsChk fs) (ReadRequest dr bucket)
+  atomically $ writeTBQueue (sfReqs fs) (ReadRequest dr bucket)
   atomically $ takeTMVar bucket
-getData _ dr = print ("cannot getData " ++ show dr) >> return Nothing

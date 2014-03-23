@@ -17,9 +17,10 @@ import Data.Either ( partitionEithers )
 import qualified Data.Map.Strict as Map
 import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
+import System.FilePath ( (</>) )
 
+import Freenet.Chk
 import qualified Freenet.Companion as FC
-import Freenet.Data
 import Freenet.Metadata
 import qualified Freenet.Store as FS
 import Freenet.Types
@@ -28,7 +29,7 @@ import qualified Freenet.URI as FU
 newtype DataHandler = DataHandler (TMVar (Either T.Text DataFound)) deriving ( Eq )
 
 data Freenet = FN
-               { fnStore     :: FS.FileStore
+               { fnChkStore    :: FS.StoreFile
                , fnCompanion :: Maybe FC.Companion
                , fnRequests  :: TVar (Map.Map Key [DataHandler])
                }
@@ -38,7 +39,7 @@ initFn :: CFG.Config -> IO Freenet
 initFn cfg = do
   -- datastore
   dsdir <- CFG.require cfg "datastore"
-  chkStore <- FS.mkFileStore (1024 * 16) dsdir
+  chkStore <- FS.mkStoreFile (1024 * 16) $ dsdir </> "store-chk"
   reqs <- newTVarIO Map.empty
   
   let fn = FN chkStore Nothing reqs
@@ -49,13 +50,13 @@ initFn cfg = do
   case chost of
     Nothing -> return fn
     Just _  -> do
-      comp <- FC.initCompanion ccfg (offer fn True)
+      comp <- FC.initCompanion ccfg (offerChk fn True) (error "offerSsk is missing")
       return $ fn { fnCompanion = Just comp }
 
-offer :: Freenet -> Bool -> DataFound -> STM ()
-offer fn toStore df = do
+offerChk :: Freenet -> Bool -> ChkFound -> STM ()
+offerChk fn toStore df = do
   -- write to our store
-  when toStore $ FS.putData (fnStore fn) df
+  when toStore $ FS.putData (fnChkStore fn) df
 
   -- inform other registered handlers
   m <- readTVar (fnRequests fn)
@@ -96,15 +97,15 @@ timeoutHandler fn key = do
     
   return dh
   
-handleRequest :: Freenet -> DataRequest -> IO ()
-handleRequest fn dr = do
-  fromStore <- FS.getData (fnStore fn) dr
+handleChkRequest :: Freenet -> ChkRequest -> IO ()
+handleChkRequest fn dr = do
+  fromStore <- FS.getData (fnChkStore fn) dr
   
   case fromStore of
-    Just df -> atomically $ offer fn False df
+    Just df -> atomically $ offerChk fn False df
     Nothing -> case fnCompanion fn of
       Nothing -> return ()
-      Just c  -> FC.getData c dr
+      Just c  -> FC.getChk c dr
 
 fetchRedirect :: Freenet -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
 fetchRedirect fn (RedirectKey _ uri) = fetchUri fn uri
@@ -196,7 +197,7 @@ fetchUri fn uri = do
   
   case df of
     Left e  -> return $ Left e
-    Right d -> case decryptDataFound key d of
+    Right d -> case decryptBlock key d of
       Left e          -> return $ Left e
       Right plaintext -> if FU.isControlDocument uri
                          then do

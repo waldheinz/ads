@@ -1,7 +1,10 @@
 
 -- | Freenet's modified Base64 encoding
 module Freenet.Base64 (
-  FreenetBase64(..)
+  FreenetBase64(..),
+
+  -- * Integer utilities
+  i2bs, bs2i
 ) where
 
 import Data.Bits ( shiftL, shiftR )

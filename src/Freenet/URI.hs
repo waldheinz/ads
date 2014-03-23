@@ -9,7 +9,7 @@ module Freenet.URI (
   ChkExtra, mkChkExtra, chkExtraCrypto,
 
   -- * SSKs
-  sskLocation, sskExtraCrypto, sskEncryptDocname
+  sskExtraCrypto, sskEncryptDocname
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -26,7 +26,8 @@ import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8', encodeUtf8 )
 
 import Freenet.Base64
-import qualified Freenet.Rijndael as RD
+import Freenet.Chk
+import Freenet.Ssk
 import Freenet.Types  
 
 data URI
@@ -43,6 +44,11 @@ data URI
        , sskDocName    :: T.Text   -- ^ the document name, which is the mandatory first path element
        , sskPath       :: [T.Text] -- ^ the remainder of the path
        }
+
+{-
+toDataRequest :: (DataRequest dr) => URI -> dr
+toDataRequest (CHK loc _ e _) = ChkRequest loc $ chkExtraCrypto e
+-}
 
 instance Show URI where
   show (CHK l k e p) = "CHK@" ++ show l ++ "," ++ show k ++ "," ++ show e ++ "/" ++ (T.unpack $ T.intercalate "/" p)
@@ -187,33 +193,3 @@ instance Binary SskExtra where
 -- which is at (zero based) index 2
 sskExtraCrypto :: SskExtra -> Word8
 sskExtraCrypto se = BS.index (unSskExtra se) 2
-
--- |
--- for SSKs, the routing key is determined by
--- H(PK) and the encrypted document name's hash E(H(docname))
-sskLocation'
-  :: Key    -- ^ the public key hash
-  -> Key    -- ^ the crypto key (required to encrypt the docname)
-  -> T.Text -- ^ the document name
-  -> Key    -- ^ the resulting routing key
-sskLocation' hpk ckey docname = sskLocation hpk ehd where
-  ehd = sskEncryptDocname ckey docname
-
--- |
--- determines the location for a SSK document
-sskLocation
-  :: Key    -- ^ hash (public key)
-  -> Key    -- ^ encrypt ( hash ( docname ) )
-  -> Key    -- ^ routing key
-sskLocation hpk ehd = mkKey' $ BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unKey ehd, unKey hpk]
-
--- |
--- encrypts the hash of an SSK document name. this is needed
--- to determine the location of an SSK document
-sskEncryptDocname
-  :: Key    -- ^ the crypto key (second part of the SSK URI) 
-  -> T.Text -- ^ the document name (first path element of SSK URI)
-  -> Key    -- ^ the encrypted document name
-sskEncryptDocname ckey docname = mkKey' $ RD.encipher rjk dnh where
-  rjk = RD.initKey 32 $ unKey ckey -- prepare encryption key
-  dnh = BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromStrict (encodeUtf8 docname)

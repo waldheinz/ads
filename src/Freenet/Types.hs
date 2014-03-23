@@ -1,11 +1,9 @@
 
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, MultiParamTypeClasses #-}
 
 module Freenet.Types (
   Key(..), mkKey, mkKey',
-  
-  -- * things that go to the store
-  StorePersistable(..)
+  DataRequest(..), DataFound(..), EncryptedBlock(..)
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -43,12 +41,12 @@ mkKey' bs
   | BS.length bs == keySize = Key bs
   | otherwise               = error "expected 32 bytes in mkKey"
 
-----------------------------------------------------------------
--- store related
-----------------------------------------------------------------
 
-class StorePersistable a where
-  storePersistFile :: a -> String
-  storePersistPut  :: a -> Put
-  storePersistGet  :: String -> Get a -- ^ given a filename, get the data
-  
+class DataFound f where
+  dataFoundLocation :: f -> Key
+
+class EncryptedBlock f where
+  decryptBlock :: f -> Key -> Either T.Text BS.ByteString
+
+class Show r => DataRequest r where
+  dataRequestLocation :: r -> Key
