@@ -10,6 +10,7 @@ import Network.Wai.Handler.Warp as Warp
 
 import Freenet as FN
 import Freenet.Fproxy as FP
+import Freenet.Rijndael as RD
 import Logging as LOG
 import Net
 import Node as N
@@ -17,6 +18,7 @@ import Peers as P
 
 main :: IO ()
 main = withSocketsDo $ do
+  RD.initRijndael
   cfg <- CFG.load [CFG.Required "configs/test.cfg"]
 
   LOG.initLogging $ CFG.subconfig "logging" cfg

@@ -16,8 +16,8 @@ executable ads
   main-is:             Main.hs
   ghc-options:         -Wall -threaded
   -- -debug
-  -- other-modules:       
-  -- other-extensions:    
+  c-sources:           cbits/rijndael.c
+  cc-options:          -Wall -O2 -std=c99
   build-depends:
     base                 >=4.6 && <4.7,
     base16-bytestring    >= 0.1,
