@@ -19,19 +19,22 @@ import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 import System.FilePath ( (</>) )
 
+import Freenet.Bucket
 import Freenet.Chk
 import qualified Freenet.Companion as FC
 import Freenet.Metadata
 import qualified Freenet.Store as FS
 import Freenet.Types
-import qualified Freenet.URI as FU
+import Freenet.URI
 
-newtype DataHandler = DataHandler (TMVar (Either T.Text DataFound)) deriving ( Eq )
+-- |
+-- 
+type KeyToBucket d = Map.Map Key (MemoryBucket (Maybe d))
 
 data Freenet = FN
-               { fnChkStore    :: FS.StoreFile
-               , fnCompanion :: Maybe FC.Companion
-               , fnRequests  :: TVar (Map.Map Key [DataHandler])
+               { fnChkStore   :: FS.StoreFile
+               , fnCompanion  :: Maybe FC.Companion
+               , fnChkBuckets :: TVar (KeyToBucket ChkFound)
                }
 
 -- | initializes Freenet subsystem
@@ -40,7 +43,7 @@ initFn cfg = do
   -- datastore
   dsdir <- CFG.require cfg "datastore"
   chkStore <- FS.mkStoreFile (1024 * 16) $ dsdir </> "store-chk"
-  reqs <- newTVarIO Map.empty
+  reqs <- newMemoryBucket
   
   let fn = FN chkStore Nothing reqs
 
@@ -58,15 +61,16 @@ offerChk fn toStore df = do
   -- write to our store
   when toStore $ FS.putData (fnChkStore fn) df
 
-  -- inform other registered handlers
-  m <- readTVar (fnRequests fn)
+  -- put the data into the bucket (if there is one)
+  m <- readTVar (fnChkBuckets fn)
   inform $ Map.lookup key m
-  modifyTVar (fnRequests fn) (Map.delete key)
+  modifyTVar (fnChkBuckets fn) (Map.delete key)
   where
     key = dataFoundLocation df
     inform Nothing = return ()
-    inform (Just dhs) = mapM_ (\(DataHandler bucket) -> putTMVar bucket (Right df)) dhs
+    inform (Just bucket) = putBucket bucket $ Just df
 
+{-
 addHandler :: Freenet -> Key -> DataHandler -> STM ()
 addHandler fn key dh = modifyTVar (fnRequests fn) $ Map.insertWith (++) key [dh]
 
@@ -74,29 +78,8 @@ removeHandler :: Freenet -> Key -> DataHandler -> STM ()
 removeHandler fn key dh = modifyTVar (fnRequests fn) $ Map.update u key where
   u dhs = if null dhs' then Nothing else Just dhs' where
     dhs' = filter (== dh) dhs
+-}
 
--- | creates a dataHandler which will set it's bucket to Nothing after a timeout
-timeoutHandler :: Freenet -> Key -> IO DataHandler
-timeoutHandler fn key = do
-  timeout <- registerDelay (1000 * 1000 * 10)
-  
-  dh@(DataHandler bucket) <- atomically $ do
-    dfc <- newEmptyTMVar
-    let dh = DataHandler dfc
-    addHandler fn key dh
-    return dh
-  
-  void $ forkIO $ atomically $ do
-    empty <- isEmptyTMVar bucket
-
-    if empty
-      then readTVar timeout >>= \to -> if to
-                                       then putTMVar bucket (Left "timeout") >> removeHandler fn key dh
-                                       else retry
-      else removeHandler fn key dh
-    
-  return dh
-  
 handleChkRequest :: Freenet -> ChkRequest -> IO ()
 handleChkRequest fn dr = do
   fromStore <- FS.getData (fnChkStore fn) dr
@@ -115,19 +98,19 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) = do -- TODO: we're not retur
     segUris = catMaybes $ map (\(SplitFileSegment uri isd) -> if isd then Just uri else Nothing) segs
 
   -- register data handlers
-  dhs <- mapM (\uri -> timeoutHandler fn $ FU.uriLocation uri) segUris
+  dhs <- mapM (\uri -> timeoutHandler fn $ uriLocation uri) segUris
   
   -- schedule requests
-  mapM_ (\uri -> print uri >> (handleRequest fn $ toDataRequest uri)) segUris
+  mapM_ (requestData fn) segUris
   
   -- wait for data to arrive (or timeout)
   ds <- mapM (\(DataHandler bucket) -> atomically $ takeTMVar bucket) dhs
   
   -- see if everything could be fetched and try to decrypt
   let
-    keys = map FU.chkKey segUris
+    keys = map chkKey segUris
     dec (Left e)   _   = Left e
-    dec (Right df) key = decryptDataFound key df
+    dec (Right df) key = decryptChk key df
     ps = map (\(mdf, key) -> dec mdf key) $ zip ds keys
     (es, bs) = partitionEithers ps
 
@@ -173,33 +156,45 @@ resolvePath fn ps (ArchiveManifest uri _ TAR _) = do
             Right md -> resolvePath fn ps md
         Just _ -> return $ Left "the .metadata entry is of unknown type"
         _      -> return $ Left "no .metadata entry found in TAR archive"
-        
---  return $ Left "am"
 
 resolvePath _ [] (SimpleRedirect _ tgt) = return $ Right tgt -- we're done
 resolvePath _ [] (SymbolicShortlink tgt) = return $ Left tgt
 resolvePath _ ps md = return $ Left $ T.concat ["cannot locate ", T.pack (show ps), " in ", T.pack (show md)]
 
+requestData :: Freenet -> URI -> IO (Maybe ChkFound)
+requestData fn (CHK l _ e _) = do
+  atomically $ do
+    m <- readTVar (fnChkBuckets fn)
+    case Map.lookup l m of
+      Nothing -> newMemoryBucket
+                 (\mb -> writeTVar (fnChkBuckets fn) $ Map.delete l) -- cleanup
+                 (\mb -> 
+    modifyTVar (fnChkBuckets fn) $ Map.insertWith (++) key [dh]
+    
+  handleChkRequest fn $ ChkRequest l e
+
+--waitData :: Freenet -> Key 
+
 -- |
 -- Tries to fetch the specified URI, possibly parsed metadata if it's
 -- a control document, goes on fetching the referenced data if it was
 -- and finally returns everything
-fetchUri :: Freenet -> FU.URI -> IO (Either T.Text BSL.ByteString)
+fetchUri :: Freenet -> URI -> IO (Either T.Text BSL.ByteString)
 fetchUri fn uri = do
   let
-    dr = toDataRequest uri
-    key = FU.chkKey uri
-    path = FU.uriPath uri
+--    dr = toDataRequest uri
+    key = uriCryptoKey uri
+    path = uriPath uri
   
-  (DataHandler bucket) <- timeoutHandler fn $ FU.uriLocation uri
-  handleRequest fn dr
+  (DataHandler bucket) <- timeoutHandler fn $ uriLocation uri
+  requestData fn uri
   df <- atomically $ takeTMVar bucket
   
   case df of
     Left e  -> return $ Left e
     Right d -> case decryptBlock key d of
       Left e          -> return $ Left e
-      Right plaintext -> if FU.isControlDocument uri
+      Right plaintext -> if isControlDocument uri
                          then do
                            case parseMetadata plaintext of
                              Left e   -> return $ Left e

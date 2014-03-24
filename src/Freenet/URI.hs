@@ -3,7 +3,7 @@
 
 module Freenet.URI (
   URI(..), parseUri, uriLocation,
-  isControlDocument, uriPath,
+  isControlDocument, uriPath, uriCryptoKey,
 
   -- * CHKs
   ChkExtra, mkChkExtra, chkExtraCrypto,
@@ -20,13 +20,11 @@ import Data.Binary.Put
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Builder as BSB
-import Data.Digest.Pure.SHA
 import Data.Monoid
 import qualified Data.Text as T
-import Data.Text.Encoding ( decodeUtf8', encodeUtf8 )
+import Data.Text.Encoding ( decodeUtf8' )
 
 import Freenet.Base64
-import Freenet.Chk
 import Freenet.Ssk
 import Freenet.Types  
 
@@ -45,14 +43,13 @@ data URI
        , sskPath       :: [T.Text] -- ^ the remainder of the path
        }
 
-{-
-toDataRequest :: (DataRequest dr) => URI -> dr
-toDataRequest (CHK loc _ e _) = ChkRequest loc $ chkExtraCrypto e
--}
-
 instance Show URI where
   show (CHK l k e p) = "CHK@" ++ show l ++ "," ++ show k ++ "," ++ show e ++ "/" ++ (T.unpack $ T.intercalate "/" p)
   show (SSK l k e d p) = "SSK@" ++ show l ++ "," ++ show k ++ "," ++ show e ++ "/" ++ T.unpack d ++ "/" ++ (T.unpack $ T.intercalate "/" p)
+
+uriCryptoKey :: URI -> Key
+uriCryptoKey (CHK _ k _ _)   = k
+uriCryptoKey (SSK _ k _ _ _) = k
 
 -- |
 -- this should be compatible with Java's DataOutput.writeUTF(..)

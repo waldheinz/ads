@@ -59,8 +59,13 @@ chkHeaderHash = BS.take 32 . BS.drop 2 . unChkHeader
 chkHeaderCipherLen :: ChkHeader -> BS.ByteString
 chkHeaderCipherLen = BS.drop 34 . unChkHeader
 
-data ChkRequest = ChkRequest Key Word8     -- ^ the location and the hash algorithm so it can be verified
-   deriving ( Show )
+-- |
+-- Information needed to request a CHK from the network.
+data ChkRequest = ChkRequest
+                  { chkReqLocation :: Key   -- ^ the location of the data
+                  , chkReqHashAlg  :: Word8 -- ^ the hash algorithm to use
+                  }
+                deriving ( Show )
 
 instance DataRequest ChkRequest where
   dataRequestLocation (ChkRequest k _) = k
@@ -91,8 +96,6 @@ mkChkFound k h d
   | otherwise = Left "hash mismatch"
   where
     hash = bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
-
-
 
 -- |
 -- given the secret crypto key (second part of URIs), an data found can be
