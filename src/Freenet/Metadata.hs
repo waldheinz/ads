@@ -12,10 +12,10 @@ module Freenet.Metadata (
   SplitFileSegment(..),
 
   -- * Archive Manifests
-  ArchiveManifestType(..)
+  ArchiveManifestType(..), TopBlock(..)
   ) where
 
-import Control.Applicative ( (<$>) )
+import Control.Applicative ( (<$>), (<*>) )
 import Control.Monad ( liftM2, replicateM, unless, void, when )
 import Data.Binary
 import Data.Binary.Get
@@ -240,29 +240,44 @@ getSymbolicShortlink = do
 
 data ArchiveManifestType = ZIP | TAR deriving ( Eq, Show )
 
+data TopBlock = TopBlock
+                { topSize           :: Word64
+                , topCompressedSize :: Word64
+                , topBlocksRequired :: Word32
+                , topBlocksTotal    :: Word32
+                , topDontCompress   :: Word8
+                , topCompatMode     :: Word16
+                }
+                deriving ( Show )
+
+getTopBlock :: Get TopBlock
+getTopBlock = TopBlock <$> get <*> get <*> get <*> get <*> get <*> get
+                
 getArchiveManifest :: Get Metadata
 getArchiveManifest = do
   flags <- getWord16be
+
+  when (flagSet flags (flagBit Compressed)) $ fail "an archive manifest cannot be compressed"
+  when (flagSet flags (flagBit HashThisLayer)) $ fail "unsupported hashThisLayer flag set"
+  when (flagSet flags (flagBit SpecifySplitfileKey)) $ fail "unsupported specifySplitfileKey flag set"
+  when (flagSet flags (flagBit Dbr)) $ fail "unsupported dbr flag set"
+  when (flagSet flags (flagBit ExtraMetadata)) $ fail "unsupported extraMetadata flag set"
   
   hashes <- if flagSet flags (flagBit Hashes)
     then getHashes 
     else return []
 
+  when (flagSet flags (flagBit TopSize)) $ void getTopBlock
+  
   atype <- do
     tw <- getWord16be
     case tw of
       0 -> return ZIP
       1 -> return TAR
       x -> fail $ "unknown archive type " ++ show x
-
+      
   mime <- getMime flags
   
-  when (flagSet flags (flagBit Compressed)) $ fail "an archive manifest cannot be compressed"
-  when (flagSet flags (flagBit HashThisLayer)) $ fail "unsupported hashThisLayer flag set"
-  when (flagSet flags (flagBit TopSize)) $ fail "unsupported topSize flag set"
-  when (flagSet flags (flagBit SpecifySplitfileKey)) $ fail "unsupported specifySplitfileKey flag set"
-  when (flagSet flags (flagBit Dbr)) $ fail "unsupported dbr flag set"
-  when (flagSet flags (flagBit ExtraMetadata)) $ fail "unsupported extraMetadata flag set"
 
   key <- getKey flags
   return $ ArchiveManifest key mime atype hashes

@@ -57,6 +57,7 @@ data DataRequest
        , sskReqEhd      :: ! Key
        , sskReqAlg      :: ! Word8
        }  
+       deriving ( Show )
 
 class DataFound a => StorePersistable a where
   storeSize :: a -> Int

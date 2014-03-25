@@ -74,6 +74,8 @@ offerChk fn toStore df = do
 
 handleDataRequest :: Freenet -> DataRequest -> IO ()
 handleDataRequest fn dr = do
+  print ("data request" , dr)
+  
   fromStore <- case dr of
     (ChkRequest { }) -> FS.getData (fnChkStore fn) dr
     _ -> return Nothing
