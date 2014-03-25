@@ -6,7 +6,6 @@ module Freenet (
   ) where
 
 import qualified Codec.Archive.Tar as TAR
-import qualified Codec.Compression.GZip as Gzip
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
 import Control.Monad ( void, when )
@@ -19,6 +18,7 @@ import qualified Data.Text as T
 import System.FilePath ( (</>) )
 
 import Freenet.Chk
+import Freenet.Compression
 import qualified Freenet.Companion as FC
 import Freenet.Keys
 import Freenet.Metadata
@@ -108,11 +108,8 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) = do -- TODO: we're not retur
     then return $ Left $ T.intercalate ", " es
     else do
       let cdata = BSL.take (fromIntegral dlen) $ BSL.concat bs
-      case comp of
-        None -> return $ Right $ cdata
-        Gzip -> return $ Right $ BSL.take (fromIntegral olen) $ Gzip.decompress cdata -- FIXME: does decompress throw on illegal input? seems likely
-        x    -> return $ Left $ T.pack $ "unsupported compression codec " ++ show x
-
+      decompress comp cdata
+      
 -- | FIXME: watch out for infinite redirects
 resolvePath
   :: Freenet

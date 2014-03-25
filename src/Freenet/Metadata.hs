@@ -29,6 +29,7 @@ import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8' )
 
+import Freenet.Compression
 import Freenet.Mime
 import Freenet.Types
 import Freenet.URI
@@ -93,8 +94,6 @@ flagBit f = case f of
   Hashes              -> 512
   SpecifySplitfileKey -> 1024
   HashThisLayer       -> 2048
-
-data CompressionCodec = None | Gzip | Bzip2 | LZMA | LZMA_NEW deriving ( Show )
 
 getMime
   :: Word16    -- ^ doctype - level flags
