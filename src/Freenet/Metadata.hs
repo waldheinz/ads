@@ -94,7 +94,7 @@ flagBit f = case f of
   SpecifySplitfileKey -> 1024
   HashThisLayer       -> 2048
 
-data CompressionCodec = None | Gzip | Bzip2 deriving ( Show )
+data CompressionCodec = None | Gzip | Bzip2 | LZMA | LZMA_NEW deriving ( Show )
 
 getMime
   :: Word16    -- ^ doctype - level flags
@@ -149,26 +149,28 @@ data RedirectTarget
     deriving ( Show )
 
 getCompression
-  :: Word16 -- ^ flags
-  -> Word64 -- ^ data length 
-  -> Get (CompressionCodec, Word64)
+  :: Word16                         -- ^ flags
+  -> Word64                         -- ^ data length 
+  -> Get (CompressionCodec, Word64) -- ^ (compression codec, decomressed size)
 getCompression flags dlen =
   if (flagSet flags (flagBit Compressed))
   then do
     c <- getWord16be >>= \c -> case c of
       0 -> return Gzip
       1 -> return Bzip2
+      2 -> return LZMA
+      3 -> return LZMA_NEW
       x -> fail $ "unknown compressor " ++ show x
     len <- getWord64be
     return (c, len)
   else return (None, dlen)
 
 getSplitFile
-  :: Word16     -- ^ flags
-  -> Maybe Key  -- ^ (single crypto key for all segments), if those are common
+  :: Word16      -- ^ flags
+  -> Maybe Key   -- ^ (single crypto key for all segments), if those are common
+  -> Word8 -- ^ single crypto algorihm for all segments
   -> Get RedirectTarget
-getSplitFile flags mkey = do
-  cryptoAlgo <- getWord8
+getSplitFile flags mkey cryptoAlgo = do
   dlen <- getWord64be
   
   (ccodec, olen) <- getCompression flags dlen
@@ -215,10 +217,10 @@ data Metadata
     { mEntries      :: [(T.Text, Metadata)]
     }
   | ArchiveManifest
-    { amUri         :: URI
-    , amMime        :: Maybe Mime
+    { amTarget      :: RedirectTarget
     , amType        :: ArchiveManifestType
     , amHashes      :: [(HashType, BS.ByteString)]
+    , amCompCodec   :: CompressionCodec
     }
   | SymbolicShortlink
     { slTarget      :: T.Text
@@ -252,35 +254,20 @@ data TopBlock = TopBlock
 
 getTopBlock :: Get TopBlock
 getTopBlock = TopBlock <$> get <*> get <*> get <*> get <*> get <*> get
-                
-getArchiveManifest :: Get Metadata
-getArchiveManifest = do
+
+getArchiveManifest :: Version -> Get Metadata
+getArchiveManifest v = do
   flags <- getWord16be
+  (hashes, target, (Just atype)) <- getSimpleRedirect' v flags True
+  return $ ArchiveManifest target atype hashes None
 
-  when (flagSet flags (flagBit Compressed)) $ fail "an archive manifest cannot be compressed"
-  when (flagSet flags (flagBit HashThisLayer)) $ fail "unsupported hashThisLayer flag set"
-  when (flagSet flags (flagBit SpecifySplitfileKey)) $ fail "unsupported specifySplitfileKey flag set"
-  when (flagSet flags (flagBit Dbr)) $ fail "unsupported dbr flag set"
-  when (flagSet flags (flagBit ExtraMetadata)) $ fail "unsupported extraMetadata flag set"
-  
-  hashes <- if flagSet flags (flagBit Hashes)
-    then getHashes 
-    else return []
-
-  when (flagSet flags (flagBit TopSize)) $ void getTopBlock
-  
-  atype <- do
-    tw <- getWord16be
-    case tw of
-      0 -> return ZIP
-      1 -> return TAR
-      x -> fail $ "unknown archive type " ++ show x
-      
-  mime <- getMime flags
-  
-
-  key <- getKey flags
-  return $ ArchiveManifest key mime atype hashes
+getArchiveManifestType :: Get ArchiveManifestType
+getArchiveManifestType = do
+  tw <- getWord16be
+  case tw of
+    0 -> return ZIP
+    1 -> return TAR
+    x -> fail $ "unknown archive type " ++ show x
 
 getKey
   :: Word16 -- ^ flags
@@ -325,26 +312,40 @@ getSimpleManifest = do
 getSimpleRedirect :: Version -> Get Metadata
 getSimpleRedirect v = do
   flags <- getWord16be
+  (hashes, target, _) <- getSimpleRedirect' v flags False
+  return $! SimpleRedirect hashes target 
 
+getSimpleRedirect' :: Version -> Word16 -> Bool -> Get ([(HashType, BS.ByteString)], RedirectTarget, Maybe ArchiveManifestType)
+getSimpleRedirect' v flags isArchive = do
   hashes <- if flagSet flags (flagBit Hashes)
     then getHashes 
     else return []
 
+  when (flagSet flags (flagBit TopSize)) $ void getTopBlock
+
+  atype <- if isArchive
+           then Just <$> getArchiveManifestType
+           else return Nothing
+  
   when (v == V1 && not (elem SHA256 $ map fst hashes)) $ fail "no SHA256 hash specified in V1 redirect"
   when (flagSet flags (flagBit HashThisLayer)) $ fail "unsupported hashThisLayer flag set"
-  when (flagSet flags (flagBit TopSize)) $ fail "unsupported topSize flag set"
-  when (flagSet flags (flagBit SpecifySplitfileKey)) $ fail "unsupported specifySplitfileKey flag set"
   when (flagSet flags (flagBit Dbr)) $ fail "unsupported dbr flag set"
   when (flagSet flags (flagBit ExtraMetadata)) $ fail "unsupported extraMetadata flag set"
   
   target <- if flagSet flags (flagBit FlagSplitFile)
-            then getSplitFile flags (deriveCryptoKey hashes)
+            then do
+              when (v == V0) $ fail "can't read V0 splitfile"
+              calg <- getWord8 -- single crypto algorithm
+              key <- if flagSet flags (flagBit SpecifySplitfileKey)
+                     then Just . mkKey' <$> getByteString 32
+                     else return $ deriveCryptoKey hashes
+              getSplitFile flags key calg
             else do
               -- unless (flags == 40) $ fail $ "unsupported flags for key redirect " ++ show flags
               mime <- getMime flags
               RedirectKey mime <$> getKey flags
                  
-  return $! SimpleRedirect hashes target 
+  return $! (hashes, target, atype)
 
 data Version = V0 | V1 deriving ( Eq )
 
@@ -363,7 +364,7 @@ instance Binary Metadata where
         (0, 2) -> getSimpleManifest
         (0, 6) -> getSymbolicShortlink
         (1, 0) -> getSimpleRedirect V1
-        (1, 3) -> getArchiveManifest
+        (1, 3) -> getArchiveManifest V1
         vd     -> fail $ "unknown version/doctype " ++ show vd
     
 parseMetadata :: BS.ByteString -> Either T.Text Metadata

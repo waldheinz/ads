@@ -124,9 +124,8 @@ resolvePath fn (p:ps) (Manifest es) = print (p, es) >> case lookup p es of
   Nothing -> return $ Left $ "could not find path in manifest: " `T.append` p
   Just md -> resolvePath fn ps md
 
-
-resolvePath fn ps (ArchiveManifest uri _ TAR _) = do
-  archive <- fetchUri fn uri
+resolvePath fn ps (ArchiveManifest tgt TAR _ None) = do
+  archive <- fetchRedirect fn tgt
   
   case archive of
     Left e -> return $ Left e
