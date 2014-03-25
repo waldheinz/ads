@@ -75,9 +75,14 @@ data ChkFound = ChkFound !Key !ChkHeader !BS.ByteString -- location, headers and
 instance Show ChkFound where
   show (ChkFound k h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
 
+-- |
+-- Size of the CHK payload, which is 32kiB.
+chkDataSize :: Int
+chkDataSize = 32768
+
 chkPersist :: StorePersistable ChkRequest ChkFound
 chkPersist = SP
-  { storeSize = error "CHK store size"
+  { storeSize = 32 + chkHeaderSize + chkDataSize
   , storePut  = \(ChkFound k h d) -> put k >> put h >> putByteString d
   , storeGet  = \_ -> do
     (k, h, d) <- (,,) <$> get <*> get <*> getByteString 32768
@@ -103,11 +108,11 @@ mkChkFound k h d
 decryptChk
   :: Key                          -- ^ the secret crypto key (second part of URIs)
   -> ChkFound                     -- ^ the encrypted data together with their headers
-  -> Either T.Text BS.ByteString  -- ^ the decrypted payload
+  -> Either T.Text BSL.ByteString  -- ^ the decrypted payload
 decryptChk key (ChkFound _ header ciphertext)
   | len > BS.length plaintext = Left $ "invalid length"
   | mac /= BSL.fromStrict hash = Left $ "mac mismatch"
-  | otherwise = Right plaintext
+  | otherwise = Right (BSL.fromStrict plaintext)
   where
     hash = chkHeaderHash header
     cipherLen = chkHeaderCipherLen header

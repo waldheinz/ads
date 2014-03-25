@@ -51,7 +51,7 @@ mkStoreFile sp fileName count = do
         then storeGet sp dr
         else fail "empty slot"
     doPut df    = putWord8 1 >> storePut sp df
-    isFree = getWord8 >>= (\flags -> return $ flags == 1)
+    isFree = getWord8 >>= (\flags -> return $ flags == 0)
 
     fileSize  = count * (fromIntegral entrySize)
   

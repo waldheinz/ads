@@ -3,7 +3,7 @@
 
 module Freenet.Types (
   Key(..), mkKey, mkKey',
-  DataRequest(..), DataFound(..), EncryptedBlock(..)
+  DataRequest(..), DataFound(..)
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -11,6 +11,7 @@ import Data.Binary
 import Data.Binary.Put
 import Data.Binary.Get
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
 import Data.Hashable
 import qualified Data.Text as T
 
@@ -41,12 +42,9 @@ mkKey' bs
   | BS.length bs == keySize = Key bs
   | otherwise               = error "expected 32 bytes in mkKey"
 
-
 class DataFound f where
   dataFoundLocation :: f -> Key
-
-class EncryptedBlock f where
-  decryptBlock :: f -> Key -> Either T.Text BS.ByteString
+  decryptBlock      :: f -> Key -> Either T.Text BSL.ByteString
 
 class Show r => DataRequest r where
   dataRequestLocation :: r -> Key
