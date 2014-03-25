@@ -3,7 +3,7 @@
 
 module Freenet.Types (
   Key(..), mkKey, mkKey',
-  DataRequest(..), DataFound(..)
+  DataRequest(..), DataFound(..), StorePersistable(..)
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -44,7 +44,21 @@ mkKey' bs
 
 class DataFound f where
   dataFoundLocation :: f -> Key
-  decryptBlock      :: f -> Key -> Either T.Text BSL.ByteString
+  decryptDataFound  :: f -> Key -> Either T.Text BSL.ByteString
 
-class Show r => DataRequest r where
-  dataRequestLocation :: r -> Key
+
+data DataRequest
+     = ChkRequest
+       { chkReqLocation :: ! Key   -- ^ the location of the data
+       , chkReqHashAlg  :: ! Word8 -- ^ the hash algorithm to use
+       }
+     | SskRequest
+       { sskReqPkh      :: ! Key
+       , sskReqEhd      :: ! Key
+       , sskReqAlg      :: ! Word8
+       }  
+
+class DataFound a => StorePersistable a where
+  storeSize :: a -> Int
+  storePut  :: a -> Put
+  storeGet  :: DataRequest -> Get a

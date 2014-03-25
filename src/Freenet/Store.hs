@@ -18,28 +18,24 @@ import qualified Data.ByteString.Lazy as BSL
 import Data.Hashable
 import System.IO
 
+import Freenet.Keys
 import Freenet.Types
 
 ----------------------------------------------------------------
 -- store types
 ----------------------------------------------------------------
 
-data StorePersistable r f = SP
-                            { storeSize :: Int
-                            , storePut :: (DataFound f) => f -> Put
-                            , storeGet :: (DataRequest r, DataFound f) => r -> Get f
-                            }
-data StoreRequest r f
-     = ReadRequest  r (TMVar (Maybe f)) -- ^ the request and where to put the data when found
+data StoreRequest f
+     = ReadRequest  DataRequest (TMVar (Maybe f)) -- ^ the request and where to put the data when found
      | WriteRequest f                   -- ^ the data to put in the store
 
-data StoreFile r f = StoreFile
+data StoreFile f = StoreFile
                      { _sfThread :: ! ThreadId
-                     , sfReqs    :: ! (TBQueue (StoreRequest r f))
+                     , sfReqs    :: ! (TBQueue (StoreRequest f))
                      , _sfHandle :: ! Handle
                      }
 
-mkStoreFile :: (DataRequest r, DataFound f) => StorePersistable r f -> FilePath -> Int -> IO (StoreFile r f)
+mkStoreFile :: StorePersistable f => f -> FilePath -> Int -> IO (StoreFile f)
 mkStoreFile sp fileName count = do
   rq <- newTBQueueIO 10
   
@@ -48,9 +44,9 @@ mkStoreFile sp fileName count = do
     doGet dr = do
       flags <- getWord8
       if flags == 1
-        then storeGet sp dr
+        then storeGet dr
         else fail "empty slot"
-    doPut df    = putWord8 1 >> storePut sp df
+    doPut df    = putWord8 1 >> storePut df
     isFree = getWord8 >>= (\flags -> return $ flags == 0)
 
     fileSize  = count * (fromIntegral entrySize)
@@ -106,10 +102,10 @@ mkStoreFile sp fileName count = do
 
   return $ StoreFile tid rq handle
   
-putData :: DataFound f => StoreFile r f -> f -> STM ()
+putData :: DataFound f => StoreFile f -> f -> STM ()
 putData sf df = writeTBQueue (sfReqs sf) (WriteRequest df)
 
-getData :: (DataRequest r, DataFound f) => StoreFile r f -> r -> IO (Maybe f)
+getData :: DataFound f => StoreFile f -> DataRequest -> IO (Maybe f)
 getData fs dr = do
   bucket <- newEmptyTMVarIO
   atomically $ writeTBQueue (sfReqs fs) (ReadRequest dr bucket)

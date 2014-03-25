@@ -20,18 +20,18 @@ import System.FilePath ( (</>) )
 
 import Freenet.Chk
 import qualified Freenet.Companion as FC
+import Freenet.Keys
 import Freenet.Metadata
+import Freenet.Ssk
 import qualified Freenet.Store as FS
 import Freenet.Types
 import Freenet.URI
 
-data DataBlock
-     = ChkBlock ! ChkFound
-
 data Freenet = FN
-               { fnChkStore    :: FS.StoreFile ChkRequest ChkFound
+               { fnChkStore    :: FS.StoreFile ChkFound
                , fnCompanion   :: Maybe FC.Companion
                , fnIncomingChk :: TChan ChkFound
+               , fnIncomingSsk :: TChan SskFound
                }
 
 -- | initializes Freenet subsystem
@@ -39,10 +39,12 @@ initFn :: CFG.Config -> IO Freenet
 initFn cfg = do
   -- datastore
   dsdir       <- CFG.require cfg "datastore"
-  chkStore    <- FS.mkStoreFile chkPersist (dsdir </> "store-chk") (1024 * 16)
+  chkStore    <- FS.mkStoreFile (undefined :: ChkFound) (dsdir </> "store-chk") (1024 * 16)
   
   chkIncoming <- newBroadcastTChanIO
-  let fn = FN chkStore Nothing chkIncoming
+  sskIncoming <- newBroadcastTChanIO
+  
+  let fn = FN chkStore Nothing chkIncoming sskIncoming
 
   -- companion
   let ccfg = CFG.subconfig "companion" cfg
@@ -50,8 +52,17 @@ initFn cfg = do
   case chost of
     Nothing -> return fn
     Just _  -> do
-      comp <- FC.initCompanion ccfg (offerChk fn True) (error "offerSsk is missing")
+      comp <- FC.initCompanion ccfg (offerChk fn True) (offerSsk fn True)
       return $ fn { fnCompanion = Just comp }
+
+offerSsk :: Freenet -> Bool -> SskFound -> STM ()
+offerSsk fn toStore df = do
+  -- write to our store
+--  when toStore $ FS.putData (fnSskStore fn) df
+  
+  -- broadcast arrival
+  writeTChan (fnIncomingSsk fn) df
+  
 
 offerChk :: Freenet -> Bool -> ChkFound -> STM ()
 offerChk fn toStore df = do
@@ -61,25 +72,22 @@ offerChk fn toStore df = do
   -- broadcast arrival
   writeTChan (fnIncomingChk fn) df
 
-handleChkRequest :: Freenet -> ChkRequest -> IO ()
-handleChkRequest fn dr = do
-  fromStore <- FS.getData (fnChkStore fn) dr
+handleDataRequest :: Freenet -> DataRequest -> IO ()
+handleDataRequest fn dr = do
+  fromStore <- case dr of
+    (ChkRequest { }) -> FS.getData (fnChkStore fn) dr
+    _ -> return Nothing
   
   case fromStore of
     Just df -> atomically $ offerChk fn False df
     Nothing -> case fnCompanion fn of
       Nothing -> return ()
-      Just c  -> FC.getChk c dr
+      Just c  -> FC.get c dr
 
 fetchUris :: Freenet -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
 fetchUris fn uris = do
   result <- sequence $ map (fetchUri fn) uris
   return $ zip uris result
-{-  let
-    result = zip uris $ repeat (Left "uris: timeout")
-
-  return result
-  -}
 
 fetchRedirect :: Freenet -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
 fetchRedirect fn (RedirectKey _ uri) = fetchUri fn uri
@@ -87,24 +95,11 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) = do -- TODO: we're not retur
   let
     -- TODO: use FEC check blocks as well
     segUris = catMaybes $ map (\(SplitFileSegment uri isd) -> if isd then Just uri else Nothing) segs
-{-
-  -- register data handlers
-  dhs <- mapM (\uri -> timeoutHandler fn $ uriLocation uri) segUris
-  
-  -- schedule requests
-  mapM_ (requestData fn) segUris
-  
-  -- wait for data to arrive (or timeout)
-  ds <- mapM (\(DataHandler bucket) -> atomically $ takeTMVar bucket) dhs
-  -}
+
   ds <- fetchUris fn segUris
   
   -- see if everything could be fetched and try to decrypt
   let
---    keys = map chkKey segUris
---    dec (Left e)   _   = Left e
---    dec (Right df) key = decryptChk key df
---    ps = map (\(mdf, key) -> dec mdf key) $ zip (map snd ds) keys
     (es, bs) = partitionEithers (map snd ds)
 
   if (not . null) es
@@ -154,39 +149,54 @@ resolvePath _ [] (SimpleRedirect _ tgt) = return $ Right tgt -- we're done
 resolvePath _ [] (SymbolicShortlink tgt) = return $ Left tgt
 resolvePath _ ps md = return $ Left $ T.concat ["cannot locate ", T.pack (show ps), " in ", T.pack (show md)]
 
-requestData :: Freenet -> URI -> IO (Either T.Text BSL.ByteString)
-requestData fn (CHK l ck e _) = do
+waitKeyTimeout :: DataFound f => TChan f -> Key -> IO (TMVar (Maybe f))
+waitKeyTimeout chan loc = do
   bucket  <- newEmptyTMVarIO
   timeout <- registerDelay $ 10 * 1000 * 1000
-  chan    <- atomically $ dupTChan $ fnIncomingChk fn
+  chan'    <- atomically $ dupTChan chan
   
   -- wait for data or timeout
   void $ forkIO $ atomically $ orElse
-    (readTChan chan >>= \cf -> if dataFoundLocation cf == l then putTMVar bucket (Just cf) else retry)
+    (readTChan chan' >>= \cf -> if dataFoundLocation cf == loc then putTMVar bucket (Just cf) else retry)
     (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
-    
-  handleChkRequest fn $ ChkRequest l $ chkExtraCrypto e
 
-  md <- atomically $ readTMVar bucket
+  return bucket
 
-  return $ case md of
-    Nothing -> Left "requestData: timeout"
-    Just d  -> decryptChk ck d
-
+requestData :: Freenet -> URI -> IO (Either T.Text BSL.ByteString)
+requestData fn uri = let dr = toDataRequest uri in case dr of
+  ChkRequest {} -> do
+    let 
+      l = dataRequestLocation dr
+      chan = fnIncomingChk fn
+      
+    bucket <- waitKeyTimeout (chan) l
+    handleDataRequest fn dr
+    md <- atomically $ readTMVar bucket
+  
+    return $ case md of
+      Nothing -> Left "requestData: timeout"
+      Just d  -> decryptDataFound d (uriCryptoKey uri)
+  SskRequest {} -> do
+    let 
+      l = dataRequestLocation dr
+      chan = fnIncomingSsk fn
+      
+    bucket <- waitKeyTimeout (chan) l
+    handleDataRequest fn dr
+    md <- atomically $ readTMVar bucket
+  
+    return $ case md of
+      Nothing -> Left "requestData: timeout"
+      Just d  -> decryptDataFound d (uriCryptoKey uri)
+      
+  
 -- |
 -- Tries to fetch the specified URI, parses metadata if it's
 -- a control document, goes on fetching the referenced data,
 -- and finally returns everything
 fetchUri :: Freenet -> URI -> IO (Either T.Text BSL.ByteString)
 fetchUri fn uri = do
-  let
---    dr = toDataRequest uri
-    key = uriCryptoKey uri
-    path = uriPath uri
-  
---  (DataHandler bucket) <- timeoutHandler fn $ uriLocation uri
   db <- requestData fn uri
- -- df <- atomically $ takeTMVar bucket
   
   case db of
     Left e  -> return $ Left e
@@ -195,7 +205,7 @@ fetchUri fn uri = do
                          case parseMetadata (BSL.toStrict plaintext) of
                            Left e   -> return $ Left e
                            Right md -> do
-                             tgt <- resolvePath fn path md
+                             tgt <- resolvePath fn (uriPath uri) md
                              case tgt of
                                Left e -> return $ Left e
                                Right t -> fetchRedirect fn t

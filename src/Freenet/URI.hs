@@ -2,14 +2,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet.URI (
-  URI(..), parseUri, uriLocation,
+  URI(..), parseUri,
   isControlDocument, uriPath, uriCryptoKey,
 
   -- * CHKs
   ChkExtra, mkChkExtra, chkExtraCrypto,
 
   -- * SSKs
-  sskExtraCrypto, sskEncryptDocname
+  sskExtraCrypto
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -25,7 +25,6 @@ import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8' )
 
 import Freenet.Base64
-import Freenet.Ssk
 import Freenet.Types  
 
 data URI
@@ -133,9 +132,11 @@ isControlDocument (SSK _ _ _ _ _) = True -- ^ to my knowledge, this is so
 
 -- |
 -- Determines the location (aka "routing key") for an URI.
+{-
 uriLocation :: URI -> Key
 uriLocation (CHK loc _ _ _) = loc
 uriLocation (SSK hpk ck _ doc _) = sskLocation' hpk ck doc
+-}
 
 uriPath :: URI -> [T.Text]
 uriPath (CHK _ _ _ p)   = p

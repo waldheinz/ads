@@ -4,7 +4,7 @@
 module Freenet.Companion (
   Companion, initCompanion,
 
-  getChk, getSsk
+  get
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -21,7 +21,6 @@ import System.IO
 
 import Freenet.Base64
 import Freenet.Chk
-import Freenet.Dsa
 import Freenet.Ssk
 import Freenet.Types
 
@@ -42,6 +41,8 @@ initCompanion cfg chkHandler sskHandler = do
   -- parse companion's responses and offer them to Freenet core
   void $ forkIO $ forever $ do
     (what, args) <- breakSpace . decodeUtf8 <$> BS.hGetLine handle
+    print (what, args)
+  
     case what of
       "chk" -> do
         let
@@ -62,14 +63,15 @@ initCompanion cfg chkHandler sskHandler = do
       "ssk" -> do
         let 
           (ktxt, rest) = breakSpace args
-          (_, rest') = breakSpace rest
+          (pktxt, rest') = breakSpace rest
           (hstr, rest'') = breakSpace rest'
-          (dstr, _) = breakSpace rest''
+--          (dstr, _) = breakSpace rest''
           df = do
-            key <- fromBase64' ktxt >>= mkKey
+            loc <- fromBase64' ktxt >>= mkKey
+            pubkey <- fromBase64' pktxt >>= mkPubKey
             hdr <- fromBase64' hstr >>= mkSskHeader
-            d <- fromBase64' dstr
-            mkSskFound key hdr d (error "get pubkey from companion")
+            d <- fromBase64' rest''
+            mkSskFound loc hdr d pubkey
 
         case df of
           Left e  -> putStrLn $ "could not parse SSK found response: " ++ T.unpack e
@@ -79,12 +81,11 @@ initCompanion cfg chkHandler sskHandler = do
   
   return $ Companion handle
 
-getChk :: Companion -> ChkRequest -> IO ()
-getChk comp (ChkRequest k a) =
+get :: Companion -> DataRequest -> IO ()
+get comp (ChkRequest k a) =
   let msg = T.intercalate " " ["getchk", toBase64' $ unKey k, T.pack $ show a, "\n"]
   in BS.hPut (cHandle comp) $ encodeUtf8 msg
 
-getSsk :: Companion -> SskRequest -> IO ()
-getSsk comp (SskRequest pk ehd e) = BS.hPut (cHandle comp) $ encodeUtf8 msg where
-  msg = T.intercalate " " ["getssk", k $ hashPubKey pk, k ehd, T.pack $ show e, "\n"]
+get comp (SskRequest hpk ehd e) = BS.hPut (cHandle comp) $ encodeUtf8 msg where
+  msg = T.intercalate " " ["getssk", k $ hpk, k ehd, T.pack $ show e, "\n"]
   k = toBase64' . unKey

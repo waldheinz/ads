@@ -3,12 +3,8 @@
 
 module Freenet.Chk (
   -- * Working with CHKs
-  ChkFound(..), mkChkFound, chkPersist,
-  decryptChk,
+  ChkFound(..), mkChkFound,
 
-  -- * Requesting CHKs
-  ChkRequest(..),
-  
   -- * CHK Headers
   ChkHeader, mkChkHeader, unChkHeader,
   chkHeaderHash, chkHeaderCipherLen
@@ -59,17 +55,6 @@ chkHeaderHash = BS.take 32 . BS.drop 2 . unChkHeader
 chkHeaderCipherLen :: ChkHeader -> BS.ByteString
 chkHeaderCipherLen = BS.drop 34 . unChkHeader
 
--- |
--- Information needed to request a CHK from the network.
-data ChkRequest = ChkRequest
-                  { chkReqLocation :: Key   -- ^ the location of the data
-                  , chkReqHashAlg  :: Word8 -- ^ the hash algorithm to use
-                  }
-                deriving ( Show )
-
-instance DataRequest ChkRequest where
-  dataRequestLocation (ChkRequest k _) = k
-
 data ChkFound = ChkFound !Key !ChkHeader !BS.ByteString -- location, headers and data
 
 instance Show ChkFound where
@@ -80,20 +65,19 @@ instance Show ChkFound where
 chkDataSize :: Int
 chkDataSize = 32768
 
-chkPersist :: StorePersistable ChkRequest ChkFound
-chkPersist = SP
-  { storeSize = 32 + chkHeaderSize + chkDataSize
-  , storePut  = \(ChkFound k h d) -> put k >> put h >> putByteString d
-  , storeGet  = \_ -> do
+instance StorePersistable ChkFound where
+  storeSize = \_ -> 32 + chkHeaderSize + chkDataSize
+  storePut  = \(ChkFound k h d) -> put k >> put h >> putByteString d
+  storeGet  = \_ -> do
     (k, h, d) <- (,,) <$> get <*> get <*> getByteString 32768
     case mkChkFound k h d of
       Right df -> return df
       Left e   -> fail $ T.unpack e
-  }
   
 -- | find the routing key for a DataFound
 instance DataFound ChkFound where
   dataFoundLocation (ChkFound k _ _) = k
+  decryptDataFound = flip decryptChk
 
 mkChkFound :: Key -> ChkHeader -> BS.ByteString -> Either T.Text ChkFound
 mkChkFound k h d
