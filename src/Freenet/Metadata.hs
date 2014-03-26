@@ -361,6 +361,7 @@ instance Binary Metadata where
       else case (version, doctype) of
         (0, 0) -> getSimpleRedirect V0
         (0, 2) -> getSimpleManifest
+        (0, 3) -> getArchiveManifest V0
         (0, 6) -> getSymbolicShortlink
         (1, 0) -> getSimpleRedirect V1
         (1, 3) -> getArchiveManifest V1
