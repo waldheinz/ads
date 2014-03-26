@@ -233,20 +233,34 @@ data Metadata
   | SymbolicShortlink
     { slTarget      :: T.Text
     }
+  | ArchiveMetadataRedirect
+    { amrTarget     :: T.Text
+    }
   deriving ( Show )
 
+getArchiveMetadataRedirect :: Get Metadata
+getArchiveMetadataRedirect = do
+  flags    <- getWord16be
+  -- only NoMIME has ever been seen
+  unless (flags == 4) $ fail $ "unexpected flags on symbolic short link " ++ show flags
+  tgt <- getText
+  return $ ArchiveMetadataRedirect tgt
+
+getText :: Get T.Text
+getText = do
+  tLen   <- getWord16be
+  tBytes <- getByteString (fromIntegral tLen)
+  case decodeUtf8' tBytes of
+    Left e    -> fail $ "invalid UTF8 in metadata string " ++ show e
+    Right tgt -> return tgt
+  
 getSymbolicShortlink :: Get Metadata
 getSymbolicShortlink = do
   flags    <- getWord16be
-  tgtLen   <- getWord16be
-  tgtBytes <- getByteString (fromIntegral tgtLen)
-
   -- only NoMIME has ever been seen
   unless (flags == 4) $ fail $ "unexpected flags on symbolic short link " ++ show flags
-  
-  case decodeUtf8' tgtBytes of
-    Left e    -> fail $ "invalid UTF8 in symbolic short link " ++ show e
-    Right tgt -> return $ SymbolicShortlink tgt
+  tgt <- getText
+  return $ SymbolicShortlink tgt
 
 data ArchiveManifestType = ZIP | TAR deriving ( Eq, Show )
 
@@ -357,6 +371,8 @@ getSimpleRedirect' v flags isArchive = do
                  
   return $! (hashes, target, atype)
 
+
+
 data Version = V0 | V1 deriving ( Eq )
 
 instance Binary Metadata where
@@ -373,6 +389,7 @@ instance Binary Metadata where
         (0, 0) -> getSimpleRedirect V0
         (0, 2) -> getSimpleManifest
         (0, 3) -> getArchiveManifest V0
+        (0, 5) -> getArchiveMetadataRedirect
         (0, 6) -> getSymbolicShortlink
         (1, 0) -> getSimpleRedirect V1
         (1, 3) -> getArchiveManifest V1

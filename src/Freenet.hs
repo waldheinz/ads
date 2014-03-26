@@ -13,6 +13,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import Data.Either ( partitionEithers )
+import qualified Data.Map.Strict as Map
 import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 import System.FilePath ( (</>) )
@@ -132,20 +133,15 @@ resolvePath fn ps (ArchiveManifest tgt TAR _ None) = do
     Left e -> return $ Left e
     Right bs -> do
       let
-        -- locate the ".metadata" entry in the TAR archive. heavens, why do people do this?
-        mec = TAR.foldEntries
-              (\e _ -> case TAR.entryPath e of
-                  ".metadata" -> Just $ TAR.entryContent e
-                  _           -> traceShow (TAR.entryPath e) $ Nothing)
-              Nothing
-              (\e -> traceShow e Nothing) $ TAR.read bs
-      case mec of
-        Just (TAR.NormalFile tfc _) -> do
-          case parseMetadata (BSL.toStrict tfc) of
+        emap = TAR.foldEntries (\e m -> Map.insert (TAR.entryPath e) e m) Map.empty (const Map.empty) $ TAR.read bs
+        
+      case Map.lookup ".metadata" emap of
+        Just mde -> case TAR.entryContent mde of
+          TAR.NormalFile tfc _ -> case parseMetadata (BSL.toStrict tfc) of
             Left e -> return $ Left $ "error parsing metadata from TAR archive: " `T.append` e
             Right md -> resolvePath fn ps md
-        Just _ -> return $ Left "the .metadata entry is of unknown type"
-        _      -> return $ Left "no .metadata entry found in TAR archive"
+          _                    -> return $ Left "TAR .metadata is not a regular file"
+        Nothing -> return $ Left "no .metadata entry found in TAR archive"
 
 resolvePath _ [] (SimpleRedirect _ tgt) = return $ Right tgt -- we're done
 resolvePath _ [] (SymbolicShortlink tgt) = return $ Left tgt
