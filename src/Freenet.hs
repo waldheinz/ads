@@ -16,6 +16,7 @@ import Data.Either ( partitionEithers )
 import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 import System.FilePath ( (</>) )
+import System.Log.Logger
 
 import Freenet.Chk
 import Freenet.Compression
@@ -33,6 +34,9 @@ data Freenet = FN
                , fnIncomingChk :: TChan ChkFound
                , fnIncomingSsk :: TChan SskFound
                }
+
+logI :: String -> IO ()
+logI m = infoM "freenet" m
 
 -- | initializes Freenet subsystem
 initFn :: CFG.Config -> IO Freenet
@@ -56,7 +60,7 @@ initFn cfg = do
       return $ fn { fnCompanion = Just comp }
 
 offerSsk :: Freenet -> Bool -> SskFound -> STM ()
-offerSsk fn toStore df = do
+offerSsk fn _ df = do
   -- write to our store
 --  when toStore $ FS.putData (fnSskStore fn) df
   
@@ -74,8 +78,6 @@ offerChk fn toStore df = do
 
 handleDataRequest :: Freenet -> DataRequest -> IO ()
 handleDataRequest fn dr = do
-  print ("data request" , dr)
-  
   fromStore <- case dr of
     (ChkRequest { }) -> FS.getData (fnChkStore fn) dr
     _ -> return Nothing
@@ -182,7 +184,7 @@ requestData fn uri = let dr = toDataRequest uri in case dr of
     bucket <- waitKeyTimeout (chan) l
     handleDataRequest fn dr
     md <- atomically $ readTMVar bucket
-  
+    
     return $ case md of
       Nothing -> Left "requestData: timeout"
       Just d  -> decryptDataFound d (uriCryptoKey uri)
@@ -194,6 +196,8 @@ requestData fn uri = let dr = toDataRequest uri in case dr of
 -- and finally returns everything
 fetchUri :: Freenet -> URI -> IO (Either T.Text BSL.ByteString)
 fetchUri fn uri = do
+  logI $ "fetching " ++ show uri
+  
   db <- requestData fn uri
   
   case db of

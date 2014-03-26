@@ -41,8 +41,7 @@ initCompanion cfg chkHandler sskHandler = do
   -- parse companion's responses and offer them to Freenet core
   void $ forkIO $ forever $ do
     (what, args) <- breakSpace . decodeUtf8 <$> BS.hGetLine handle
-    print (what, args)
-  
+    
     case what of
       "chk" -> do
         let
@@ -65,7 +64,6 @@ initCompanion cfg chkHandler sskHandler = do
           (ktxt, rest) = breakSpace args
           (pktxt, rest') = breakSpace rest
           (hstr, rest'') = breakSpace rest'
---          (dstr, _) = breakSpace rest''
           df = do
             loc <- fromBase64' ktxt >>= mkKey
             pubkey <- fromBase64' pktxt >>= mkPubKey
