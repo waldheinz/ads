@@ -30,9 +30,11 @@ decompress comp cdata = case comp of
     dec <- decodeLzma lzma $ BSL.toStrict cdata
     return $ Right $ BSL.fromStrict dec
   LZMA_NEW -> do
---    C.runResourceT ((bsSource d) C.$= (LZMA.decompress Nothing) C.$$ (C.fold (\l c -> BSL.append l (BSL.fromStrict c))) BSL.empty) >>= return . Right
-      return $ Left "can't decompress LZMA_NEW :-/"
-        
+    let (hdr, cd) = BSL.splitAt 5 cdata
+    lzma <- initLzma $ BSL.toStrict hdr
+    dec <- decodeLzma lzma $ BSL.toStrict cd
+    return $ Right $ BSL.fromStrict dec
+
   x        -> return $ Left $ T.pack $ "unsupported compression codec " ++ show x
 
 ----------------------------------------------------------------------------------

@@ -28,6 +28,8 @@ import qualified Freenet.Store as FS
 import Freenet.Types
 import Freenet.URI
 
+import Debug.Trace
+
 data Freenet = FN
                { fnChkStore    :: FS.StoreFile ChkFound
                , fnCompanion   :: Maybe FC.Companion
@@ -134,9 +136,9 @@ resolvePath fn ps (ArchiveManifest tgt TAR _ None) = do
         mec = TAR.foldEntries
               (\e _ -> case TAR.entryPath e of
                   ".metadata" -> Just $ TAR.entryContent e
-                  _           -> Nothing)
+                  _           -> traceShow (TAR.entryPath e) $ Nothing)
               Nothing
-              (\_ -> Nothing) $ TAR.read bs
+              (\e -> traceShow e Nothing) $ TAR.read bs
       case mec of
         Just (TAR.NormalFile tfc _) -> do
           case parseMetadata (BSL.toStrict tfc) of
