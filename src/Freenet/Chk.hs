@@ -33,7 +33,7 @@ import Freenet.Types
 
 -- |
 -- The header required to verify a CHK data block, consisting of
---    0   2    unknown
+--    0   2    word16, hash id, always 1 for SHA256
 --    2  32    SHA256(payload)
 --   34   2    encrypted(word16) true payload size, before padding to 32kiB block size
 --   ------

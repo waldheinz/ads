@@ -131,7 +131,11 @@ getSplitFileSegment common isData =
         
       return $! SplitFileSegment (CHK lk key ex []) isData
       
-    Nothing -> fail "only shared crypto infos allowed for now"
+    Nothing -> do
+      e <- get
+      (l, c) <- liftM2 (,) get get
+      return $! SplitFileSegment (CHK l c e []) isData
+--      fail "only shared crypto infos allowed for now"
 
 data RedirectTarget
   = SplitFile
@@ -165,11 +169,12 @@ getCompression flags dlen =
   else return (None, dlen)
 
 getSplitFile
-  :: Word16      -- ^ flags
+  :: Version
+  -> Word16      -- ^ flags
   -> Maybe Key   -- ^ (single crypto key for all segments), if those are common
   -> Word8 -- ^ single crypto algorihm for all segments
   -> Get RedirectTarget
-getSplitFile flags mkey cryptoAlgo = do
+getSplitFile v flags mkey cryptoAlgo = do
   dlen <- getWord64be
   
   (ccodec, olen) <- getCompression flags dlen
@@ -181,12 +186,16 @@ getSplitFile flags mkey cryptoAlgo = do
     1 -> do -- SPLITFILE_ONION_STANDARD
       paramsLen <- getWord32be
       when (paramsLen > 32768) $ fail ("too much splitfile parameter data: " ++ show paramsLen)
-      when (paramsLen /= 10) $ fail ("need 10 splitfile param bytes for version 1, got " ++ show paramsLen)
-      (blocksPerSegment, checkBlocks) <- getWord16be >>= \t -> case t of
-        0 -> do  -- SPLITFILE_PARAMS_SIMPLE_SEGMENT
-          liftM2 (,) getWord32be getWord32be
-        x  -> fail $ "unknown splitfile params type " ++ show x
-
+      when (v == V1 && paramsLen /= 10) $ fail ("need 10 splitfile param bytes for version 1, got " ++ show paramsLen)
+      when (v == V0 && paramsLen /= 8) $ fail ("need 8 splitfile param bytes for version 0, got " ++ show paramsLen)
+      
+      (blocksPerSegment, checkBlocks) <- case v of
+        V0 -> liftM2 (,) getWord32be getWord32be
+        V1 -> getWord16be >>= \t -> case t of
+          0 -> do  -- SPLITFILE_PARAMS_SIMPLE_SEGMENT
+            liftM2 (,) getWord32be getWord32be
+          x  -> fail $ "unknown splitfile params type " ++ show x
+        
       splitfileBlocks <- getWord32be
       splitfileCheckBlocks <- getWord32be
       
@@ -333,12 +342,14 @@ getSimpleRedirect' v flags isArchive = do
   
   target <- if flagSet flags (flagBit FlagSplitFile)
             then do
-              when (v == V0) $ fail "can't read V0 splitfile"
-              calg <- getWord8 -- single crypto algorithm
+        --      when (v == V0) $ fail "can't read V0 splitfile"
+              calg <- if v == V1
+                      then getWord8 -- single crypto algorithm
+                      else return 2 -- ALGO_AES_PCFB_256_SHA256
               key <- if flagSet flags (flagBit SpecifySplitfileKey)
                      then Just . mkKey' <$> getByteString 32
                      else return $ deriveCryptoKey hashes
-              getSplitFile flags key calg
+              getSplitFile v flags key calg
             else do
               -- unless (flags == 40) $ fail $ "unsupported flags for key redirect " ++ show flags
               mime <- getMime flags
