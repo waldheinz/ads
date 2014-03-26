@@ -1,6 +1,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include "lzma.h"
 
 struct lzma_dec_state {
@@ -22,7 +23,9 @@ void free_impl(void *p, void* addr) {
 struct lzma_dec_state *lzma_dec_init(void* props) {
   printf("nei\n");
   struct lzma_dec_state *state = malloc(sizeof(struct lzma_dec_state));
+  memset(state, 0, sizeof(*state));
   printf("malloc\n");
+
   if (!state) {
     return NULL;
   }
@@ -55,34 +58,40 @@ void lzma_dec_free(struct lzma_dec_state *state) {
 void* lzma_decode(struct lzma_dec_state *state, void *src, size_t src_len, size_t *dest_len) {
   ELzmaStatus status;
   size_t current_size = 4096;
-  size_t tmp_src_len = src_len;
   void *target = malloc(current_size);
-  void *write = target;
   *dest_len = 0;
   int done = 0;
+  size_t pos_in = 0;
 
   while (!done) {
-    size_t remain = current_size - *dest_len;
+    size_t remain_out = current_size - *dest_len;
+    size_t remain_in  = src_len - pos_in;
     
-    LzmaDec_DecodeToBuf(
+    int ret = LzmaDec_DecodeToBuf(
 			&state->decoder,
-			write, &remain,
-			src, &tmp_src_len,
-			LZMA_FINISH_ANY,
+			target + *dest_len, &remain_out,
+			src    + pos_in , &remain_in,
+			LZMA_FINISH_END,
 			&status);
+    
+    pos_in  += remain_in;
+    *dest_len += remain_out;
+    
+    printf ("%d %d %d\n", status, remain_in, remain_out);
 
     switch (status) {
     case LZMA_STATUS_NOT_FINISHED:
       current_size *= 2;
       target = realloc(target, current_size);
-      write = target + *dest_len;
+      break;
+    case LZMA_STATUS_NEEDS_MORE_INPUT:
+      printf("more input\n");
       break;
     default:
       done = 1;
     }
-
-
   }
-  
+
+  printf("decoded %d (size = %d)\n", *dest_len, current_size);
   return target;
 }

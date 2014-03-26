@@ -8,17 +8,14 @@ module Freenet.Compression (
 import qualified Codec.Compression.GZip as Gzip
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
-import Data.ByteString.Unsafe ( unsafeUseAsCString )
 import qualified Data.ByteString.Lazy as BSL
 import Data.Void ( Void )
 import Data.Word ( Word8 )
 import Foreign.C.Types
 import Foreign.ForeignPtr
-import Foreign.Marshal.Alloc
 import Foreign.Ptr
 import Foreign.Storable
 import qualified Data.Text as T
-import System.IO.Unsafe
 
 -- |
 -- Supported compression algorithms
@@ -29,8 +26,9 @@ decompress comp cdata = case comp of
   None     -> return $ Right $ cdata
   Gzip     -> return $ Right $ Gzip.decompress cdata -- FIXME: does decompress throw on illegal input? seems likely
   LZMA     -> do
-    let lzma = initLzma $ BS.pack [0x5d, 0x00, 0x00, 0x10, 0x00]
-    return $ Right $ BSL.fromStrict $ decodeLzma lzma $ BSL.toStrict cdata
+    lzma <- initLzma $ BS.pack [0x5d, 0x00, 0x00, 0x10, 0x00]
+    dec <- decodeLzma lzma $ BSL.toStrict cdata
+    return $ Right $ BSL.fromStrict dec
   LZMA_NEW -> do
 --    C.runResourceT ((bsSource d) C.$= (LZMA.decompress Nothing) C.$$ (C.fold (\l c -> BSL.append l (BSL.fromStrict c))) BSL.empty) >>= return . Right
       return $ Left "can't decompress LZMA_NEW :-/"
@@ -43,16 +41,20 @@ decompress comp cdata = case comp of
 
 newtype LzmaDec = LzmaDec (ForeignPtr Void)
 
-initLzma :: BS.ByteString -> LzmaDec
+initLzma :: BS.ByteString -> IO LzmaDec
 {-# NOINLINE initLzma #-}
-initLzma props = unsafePerformIO $ unsafeUseAsCString props $ \props' -> do
-  dec  <- c_lzma_dec_init props'
-  fptr <- newForeignPtr c_lzma_dec_free dec
-  return $ LzmaDec fptr
+initLzma props
+  | BS.length props /= 5 = error "props must be 5 bytes"
+  | otherwise = do
+    let (pfptr, poff, _) = BSI.toForeignPtr props
+    dec  <- withForeignPtr pfptr $ \pptr -> do
+      c_lzma_dec_init (pptr `plusPtr` poff)
+    fptr <- newForeignPtr c_lzma_dec_free dec
+    return $ LzmaDec fptr
 
-decodeLzma :: LzmaDec -> BS.ByteString -> BS.ByteString
+decodeLzma :: LzmaDec -> BS.ByteString -> IO BS.ByteString
 {-# NOINLINE decodeLzma #-}
-decodeLzma (LzmaDec fpdec) input = unsafePerformIO $ withForeignPtr fpdec $ \dec -> do
+decodeLzma (LzmaDec fpdec) input = withForeignPtr fpdec $ \dec -> do
   let
     (ifptr, ioff, ilen) = BSI.toForeignPtr input
   osize <- mallocForeignPtr
