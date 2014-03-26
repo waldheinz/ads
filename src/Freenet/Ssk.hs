@@ -123,8 +123,9 @@ mkSskFound k h d pk
     hashHeader = BS.take 72 $ unSskHeader h
     sig = uncurry DSA.Signature $ (sskHeaderRS h)
 
-decryptSskFound :: SskFound -> Key -> Either T.Text BSL.ByteString
-decryptSskFound (SskFound _ _ h d) key
+decryptSskFound :: SskFound -> Key -> Word8 -> Either T.Text BSL.ByteString
+decryptSskFound (SskFound _ _ h d) key calg
+  | calg /= 2 = Left $ T.pack $ "unknown SSK crypto algorithm " ++ show calg
   | dataLength < (fromIntegral origDataLength) = Left $ "data length mismatch"
   | otherwise = Right $ BSL.take (fromIntegral origDataLength) plaintext
   where

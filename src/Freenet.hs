@@ -175,7 +175,8 @@ requestData fn uri = let dr = toDataRequest uri in case dr of
   
     return $ case md of
       Nothing -> Left "requestData: timeout"
-      Just d  -> decryptDataFound d (uriCryptoKey uri)
+      Just d  -> decryptDataFound d (uriCryptoKey uri) (uriCryptoAlg uri)
+      
   SskRequest {} -> do
     let 
       l = dataRequestLocation dr
@@ -187,7 +188,7 @@ requestData fn uri = let dr = toDataRequest uri in case dr of
     
     return $ case md of
       Nothing -> Left "requestData: timeout"
-      Just d  -> decryptDataFound d (uriCryptoKey uri)
+      Just d  -> decryptDataFound d (uriCryptoKey uri) (uriCryptoAlg uri)
       
   
 -- |

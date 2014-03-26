@@ -44,8 +44,11 @@ mkKey' bs
 
 class DataFound f where
   dataFoundLocation :: f -> Key
-  decryptDataFound  :: f -> Key -> Either T.Text BSL.ByteString
-
+  decryptDataFound
+    :: f      
+    -> Key                          -- ^ the secret key
+    -> Word8                        -- ^ the crypto algorithm used (why this is not stored with the data is not known)
+    -> Either T.Text BSL.ByteString -- ^ either a beefy error message or the decrypted payload, already trimmed to correct length
 
 data DataRequest
      = ChkRequest

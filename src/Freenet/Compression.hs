@@ -23,7 +23,7 @@ decompress comp cdata = case comp of
   None     -> return $ Right $ cdata
   Gzip     -> return $ Right $ Gzip.decompress cdata -- FIXME: does decompress throw on illegal input? seems likely
   LZMA_NEW -> do
-    BSL.writeFile "asdfasdf" cdata
+    BSL.writeFile "asdfasdf" $ BSL.drop 0 cdata
     C.runResourceT ((bsSource d) C.$= (LZMA.decompress Nothing) C.$$ (C.fold (\l c -> BSL.append l (BSL.fromStrict c))) BSL.empty) >>= return . Right
       
       where
