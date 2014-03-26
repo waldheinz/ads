@@ -12,7 +12,8 @@ type Mime = T.Text
 
 defaultMimes :: [(Word16, Mime)]
 defaultMimes =
-  [ (388, "application/x-tar")
+  [ ( 94, "application/zip")
+  , (388, "application/x-tar")
   , (449, "image/jpeg")
   , (452, "image/png")
   , (528, "text/css")
