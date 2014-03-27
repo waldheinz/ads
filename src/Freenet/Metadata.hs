@@ -4,6 +4,7 @@
 module Freenet.Metadata (
   -- * Metadata
   Metadata(..), parseMetadata, CompressionCodec(..),
+  ManifestEntries,
 
   -- * Redirects
   RedirectTarget(..),
@@ -23,7 +24,6 @@ import Data.Bits
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as BSL
-import Data.ByteString.Lazy ( fromStrict )
 import Data.Digest.Pure.SHA
 import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
@@ -216,13 +216,15 @@ getSplitFile v flags mkey cryptoAlgo = do
 -- top-level metadata
 --------------------------------------------------------------------------
 
+type ManifestEntries = [(T.Text, Metadata)]
+
 data Metadata
   = SimpleRedirect
     { srHashes      :: [(HashType, BS.ByteString)]
     , srTarget      :: RedirectTarget
     }
   | Manifest
-    { mEntries      :: [(T.Text, Metadata)]
+    { mEntries      :: ManifestEntries
     }
   | ArchiveManifest
     { amTarget      :: RedirectTarget
@@ -236,12 +238,24 @@ data Metadata
   | ArchiveMetadataRedirect
     { amrTarget     :: T.Text
     }
+  | ArchiveInternalRedirect
+    { airTarget     :: T.Text
+    , airMime       :: Maybe Mime
+    }
   deriving ( Show )
+
+getArchiveInternalRedirect :: Get Metadata
+getArchiveInternalRedirect = do
+  flags    <- getWord16be
+  -- only CompressedMime has ever been seen
+  unless (flags == 8) $ fail $ "unexpected flags on archive internal redirect " ++ show flags
+  mime <- getMime flags
+  tgt <- getText
+  return $ ArchiveInternalRedirect tgt mime
 
 getArchiveMetadataRedirect :: Get Metadata
 getArchiveMetadataRedirect = do
   flags    <- getWord16be
-  -- only NoMIME has ever been seen
   unless (flags == 4) $ fail $ "unexpected flags on symbolic short link " ++ show flags
   tgt <- getText
   return $ ArchiveMetadataRedirect tgt
@@ -389,14 +403,15 @@ instance Binary Metadata where
         (0, 0) -> getSimpleRedirect V0
         (0, 2) -> getSimpleManifest
         (0, 3) -> getArchiveManifest V0
+        (0, 4) -> getArchiveInternalRedirect
         (0, 5) -> getArchiveMetadataRedirect
         (0, 6) -> getSymbolicShortlink
         (1, 0) -> getSimpleRedirect V1
         (1, 3) -> getArchiveManifest V1
         vd     -> fail $ "unknown version/doctype " ++ show vd
     
-parseMetadata :: BS.ByteString -> Either T.Text Metadata
-parseMetadata bs = case decodeOrFail (fromStrict bs) of
+parseMetadata :: BSL.ByteString -> Either T.Text Metadata
+parseMetadata bs = case decodeOrFail bs of
   Left (_, off, e) -> Left $ T.concat [T.pack e, " at ", T.pack $ show off]
   Right(_, _, md)  -> Right md
                                                          

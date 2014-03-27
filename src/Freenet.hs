@@ -9,6 +9,7 @@ import qualified Codec.Archive.Tar as TAR
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
 import Control.Monad ( void, when )
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
@@ -114,38 +115,70 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) = do -- TODO: we're not retur
     else do
       let cdata = BSL.take (fromIntegral dlen) $ BSL.concat bs
       decompress comp cdata
+
+type Archive = Map.Map String BSL.ByteString
+
+fetchArchive :: Freenet -> RedirectTarget -> ArchiveManifestType -> IO (Either T.Text Archive)
+fetchArchive fn tgt tp = do
+  arch <- fetchRedirect fn tgt
+  case arch of
+    Left e   -> return $ Left e
+    Right bs -> case tp of
+      TAR -> return $ Right $ TAR.foldEntries
+             (\e m -> case TAR.entryContent e of
+                 TAR.NormalFile ebs _ -> Map.insert (TAR.entryPath e) ebs m
+                 _                    -> m
+             ) Map.empty (const Map.empty) $ TAR.read bs
+      x   -> return $ Left $ T.pack $ "unsupported archive type " ++ show x
       
 -- | FIXME: watch out for infinite redirects
 resolvePath
   :: Freenet
-  -> [T.Text]  -- ^ path elements to be resolved
-  -> Metadata  -- ^ the metadata where we try to locate the entries in
-  -> IO (Either T.Text RedirectTarget) -- ^ either we fail, or we locate the final redirect step
+  -> Maybe Archive                     -- ^ archive to resolve simple redirects etc against
+  -> [T.Text]                          -- ^ path elements to be resolved
+  -> Maybe Metadata                    -- ^ the metadata where we try to locate the entries in
+  -> IO (Either T.Text BSL.ByteString) -- ^ either we fail, or we locate the final redirect step
 
-resolvePath fn (p:ps) (Manifest es) = print (p, es) >> case lookup p es of
+-- redirect to default entry, which has a name of ""
+resolvePath fn a [] md = print "default entry" >> resolvePath fn a [""] md
+
+-- resolve path inside manifest
+resolvePath fn a (p:ps) here@(Just (Manifest es)) = print ("manifest") >> case lookup p es of
   Nothing -> return $ Left $ "could not find path in manifest: " `T.append` p
-  Just md -> resolvePath fn ps md
+  Just md -> case md of
+    SymbolicShortlink tgt -> print tgt >> resolvePath fn a [tgt] here
+    ArchiveInternalRedirect tgt _ -> case a of
+      Nothing  -> return $ Left $ "AIR outside of archive"
+      Just aes -> print (Map.keys aes, tgt) >> case Map.lookup (T.unpack tgt) aes of
+        Nothing -> return $ Left $ "could not find " `T.append` tgt
+        Just bs -> return $ Right bs
+    x -> return $ Left $ T.pack $ show x -- resolvePath fn a ps $ Just md
+    
+-- resolve inside archive 
+resolvePath fn (Just aes) [p] Nothing = case Map.lookup (T.unpack p) aes of
+  Nothing -> return $ Left $ "could not find inA" `T.append` p
+  Just bs -> return $ Right bs
 
-resolvePath fn ps (ArchiveManifest tgt TAR _ None) = do
-  archive <- fetchRedirect fn tgt
-  
-  case archive of
+resolvePath fn _ ps (Just (ArchiveManifest tgt at _ None)) = print ("am", ps) >> do
+  arch <- fetchArchive fn tgt at
+  case arch of
     Left e -> return $ Left e
-    Right bs -> do
-      let
-        emap = TAR.foldEntries (\e m -> Map.insert (TAR.entryPath e) e m) Map.empty (const Map.empty) $ TAR.read bs
-        
-      case Map.lookup ".metadata" emap of
-        Just mde -> case TAR.entryContent mde of
-          TAR.NormalFile tfc _ -> case parseMetadata (BSL.toStrict tfc) of
-            Left e -> return $ Left $ "error parsing metadata from TAR archive: " `T.append` e
-            Right md -> resolvePath fn ps md
-          _                    -> return $ Left "TAR .metadata is not a regular file"
-        Nothing -> return $ Left "no .metadata entry found in TAR archive"
+    Right emap -> case Map.lookup ".metadata" emap of
+      Nothing -> return $ Left $ T.pack $ "no .metadata entry found in TAR archive" ++ show emap
+      Just mdbs -> case parseMetadata mdbs of
+        Right md -> resolvePath fn (Just emap) ps (Just md) --  set archive as new reference point
+        x        -> return $ Left $ "error parsing manifest from TAR archive: " `T.append` (T.pack $ show x)
+      
+resolvePath fn _ [] (Just (SimpleRedirect _ tgt)) = print "sr" >> fetchRedirect fn tgt
+--resolvePath fn [] (Left (SymbolicShortlink tgt)) = print "ssl" >> resolvePath fn arch [tgt] m
 
-resolvePath _ [] (SimpleRedirect _ tgt) = return $ Right tgt -- we're done
-resolvePath _ [] (SymbolicShortlink tgt) = return $ Left tgt
-resolvePath _ ps md = return $ Left $ T.concat ["cannot locate ", T.pack (show ps), " in ", T.pack (show md)]
+{-
+resolvePath fn ps (Right emap) = Left "emap"
+resolvePath fn arch@(Just (ae, _)) [] (ArchiveInternalRedirect tgt _) = print ("air " `T.append` tgt) >> case Map.lookup tgt ae of
+  Nothing -> print ae >> (return $ Left $ "could not find in archive: " `T.append` tgt)
+  Just bs -> return $ Right bs
+-}
+resolvePath _ _ ps md = return $ Left $ T.concat ["cannot locate ", T.pack (show ps), " in ", T.pack (show md)]
 
 waitKeyTimeout :: DataFound f => TChan f -> Key -> IO (TMVar (Maybe f))
 waitKeyTimeout chan loc = do
@@ -203,11 +236,7 @@ fetchUri fn uri = do
     Left e  -> return $ Left e
     Right plaintext -> if isControlDocument uri
                        then do
-                         case parseMetadata (BSL.toStrict plaintext) of
+                         case parseMetadata plaintext of
                            Left e   -> return $ Left e
-                           Right md -> do
-                             tgt <- resolvePath fn (uriPath uri) md
-                             case tgt of
-                               Left e -> return $ Left e
-                               Right t -> fetchRedirect fn t
+                           Right md -> resolvePath fn Nothing (uriPath uri) (Just md)
                        else return $ Right plaintext
