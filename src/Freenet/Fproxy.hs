@@ -12,6 +12,7 @@ import Network.HTTP.Types.Status
 import qualified Network.Wai as WAI
 
 import Freenet
+import Freenet.Fetch
 import Freenet.URI
 
 -- | error response

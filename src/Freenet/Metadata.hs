@@ -247,8 +247,8 @@ data Metadata
 getArchiveInternalRedirect :: Get Metadata
 getArchiveInternalRedirect = do
   flags    <- getWord16be
-  -- only CompressedMime has ever been seen
-  unless (flags == 8) $ fail $ "unexpected flags on archive internal redirect " ++ show flags
+  -- only NoMime / CompressedMime has ever been seen
+  unless (flags == 8 || flags == 4) $ fail $ "unexpected flags on archive internal redirect " ++ show flags
   mime <- getMime flags
   tgt <- getText
   return $ ArchiveInternalRedirect tgt mime

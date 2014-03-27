@@ -72,7 +72,7 @@ mkStoreFile sp fileName count = do
         case runGetOrFail (doGet dr) d of
           Left  (_, _, _)  -> (print $ "nothing to read at " ++ show o) >> go os
           Right (_, _, df) -> if loc == dataFoundLocation df
-                              then print ("found read at " ++ show o) >> (atomically $ putTMVar bucket $ Just df)
+                              then atomically $ putTMVar bucket $ Just df
                               else print ("something else at " ++ show o) >>  go os
           
     doWrite df = go offsets where

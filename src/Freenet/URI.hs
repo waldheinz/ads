@@ -4,7 +4,7 @@
 module Freenet.URI (
   URI(..), parseUri,
   isControlDocument, uriPath, uriCryptoKey,
-  uriCryptoAlg,
+  uriCryptoAlg, appendUriPath,
 
   -- * CHKs
   ChkExtra, mkChkExtra, chkExtraCrypto,
@@ -54,6 +54,10 @@ uriCryptoKey (SSK _ k _ _ _) = k
 uriCryptoAlg :: URI -> Word8
 uriCryptoAlg (CHK _ _ e _)   = chkExtraCrypto e
 uriCryptoAlg (SSK _ _ e _ _) = sskExtraCrypto e
+
+appendUriPath :: URI -> [T.Text] -> URI
+appendUriPath uri@(CHK {}) p = uri { chkPath = p }
+appendUriPath uri@(SSK {}) p = uri { sskPath = p }
 
 -- |
 -- this should be compatible with Java's DataOutput.writeUTF(..)
