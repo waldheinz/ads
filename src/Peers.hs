@@ -4,7 +4,7 @@
 -- |
 -- Maintain connections to other peers.
 module Peers (
-  PeerIO, ConnectFunction,
+  ConnectFunction,
   Peers, initPeers, addPeer
   ) where
 
@@ -14,7 +14,6 @@ import Control.Concurrent.STM
 import Control.Monad ( forever, void )
 import Data.Aeson
 import qualified Data.ByteString.Lazy as BSL
-import Data.Conduit
 import Data.List ( (\\) )
 import System.FilePath ( (</>) )
 import System.Log.Logger
@@ -23,8 +22,7 @@ import Message
 import Node as N
 import Types
 
-type PeerIO a = (Source IO (Message a), Sink (Message a) IO ())
-type ConnectFunction a = Peer a -> ((Either String (PeerIO a)) -> IO ()) -> IO ()
+type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
 
 ----------------------------------------------------------------
 -- the peers list
@@ -87,9 +85,9 @@ maintainConnections identity connect peers = forever $ do
       Left e -> do
         logW $ "error connecting: " ++ e ++ " on " ++ show shouldConnect
         atomically $ modifyTVar (peersConnecting peers) (filter ((==) shouldConnect))
-      Right (src, sink) -> do
+      Right msgio -> do
         logI "connected!"
-        runNode src sink (Just identity) $ \node -> do
+        runNode msgio (Just identity) $ \node -> do
           print node
   
   

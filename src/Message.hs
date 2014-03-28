@@ -1,12 +1,17 @@
 
 module Message (
-  Message(..)
+  Message(..), MessageIO
   ) where
 
 import Control.Applicative ( (<$>) )
 import Data.Binary
+import Data.Conduit
 
 import Types
+
+-- |
+-- A (source, sink) pair of messages, suitable for talking to a node.
+type MessageIO a = (Source IO (Message a), Sink (Message a) IO ())
 
 data (Show a) => Message a
      = Hello (Peer a)

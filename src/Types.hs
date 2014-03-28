@@ -49,6 +49,7 @@ instance FromJSON NodeInfo where
 -- a Peer
 ----------------------------------------------------------------
 
+
 data (Show a) => Peer a = Peer
             { peerNodeInfo :: NodeInfo        -- ^ the static node info of this peer
             , peerAddress  :: a               -- ^ where this peer might be connected

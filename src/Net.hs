@@ -68,7 +68,7 @@ nodeListen cfg ni p = do
     s = serverSettings port (fromString host)
   void $ forkIO $ runTCPServer s $ \ad -> do
     infoM "net" $ "incoming connection from " ++ (show $ appSockAddr ad)
-    N.runNode (appSource ad $= conduitDecode) (conduitEncode =$ appSink ad) Nothing $ \n -> do
+    N.runNode (appSource ad $= conduitDecode, conduitEncode =$ appSink ad) Nothing $ \n -> do
       atomically $ P.addPeer p n >> N.enqMessage n (MSG.Hello ni)
       logI $ "added peer " ++ show n
 

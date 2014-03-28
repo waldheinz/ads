@@ -44,12 +44,11 @@ enqMessage n m = writeTBMQueue (nQueue n) m
 -- ^ handle a node that is currently connected to us
 runNode
   :: (Show a)
-  => C.Source IO (Message a)
-  -> C.Sink (Message a) IO ()
+  => MessageIO a
   -> Maybe (Peer a)           -- ^ our NodeInfo, if this is an outbound connection
   -> (Node a -> IO ())        -- ^ act upon the node once handshake has completed
   -> IO ()
-runNode src sink mni connected = do
+runNode (src, sink) mni connected = do
   mq <- STM.newTBMQueueIO 5 :: IO (STM.TBMQueue (Message a))
   
   case mni of
@@ -59,7 +58,6 @@ runNode src sink mni connected = do
   void $ forkIO $ src C.$$ (C.mapM_ $ \msg -> do
     case msg of
       MSG.Hello p -> do
-        print $ "got a Peer: " ++ show p
         t <- myThreadId
         connected $ Node p t mq
       x -> print x
