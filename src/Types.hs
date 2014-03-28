@@ -18,6 +18,12 @@ import qualified Data.ByteString.Base16 as HEX
 import qualified Data.ByteString.Char8 as BSC
 import Data.Text.Encoding ( encodeUtf8 )
 
+import qualified NextBestOnce as NBO
+
+----------------------------------------------------------------------
+-- Node IDs
+----------------------------------------------------------------------
+
 newtype NodeId = NodeId { unNodeId :: BS.ByteString } deriving ( Eq )
 
 instance Binary NodeId where
@@ -30,6 +36,13 @@ instance Show NodeId where
 instance FromJSON NodeId where
   parseJSON (String s) = pure $ NodeId $ fst (HEX.decode $ encodeUtf8 s)
   parseJSON _ = mzero
+
+instance NBO.Location NodeId where
+  distance = error "distance for NodeId"
+
+----------------------------------------------------------------------
+-- Node Info
+----------------------------------------------------------------------
   
 data NodeInfo = NodeInfo
                 { nodeId :: NodeId -- ^ the globally unique node ID of 256 bits
