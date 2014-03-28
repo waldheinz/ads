@@ -70,7 +70,7 @@ nodeListen cfg ni p = do
     infoM "net" $ "incoming connection from " ++ (show $ appSockAddr ad)
     N.runNode (appSource ad $= conduitDecode, conduitEncode =$ appSink ad) Nothing $ \n -> do
       atomically $ P.addPeer p n >> N.enqMessage n (MSG.Hello ni)
-      logI $ "added peer " ++ show n
+      logI $ "added " ++ show n
 
   infoM "net" $ "node listening on " ++ host ++ ":" ++ show port
 

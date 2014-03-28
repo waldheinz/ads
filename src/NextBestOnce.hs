@@ -1,12 +1,11 @@
 
-{-# LANGUAGE MultiParamTypeClasses #-}
-
 module NextBestOnce (
-  Location(..), IntMsg(..), Message(..), Node(..), route, Result(..)
+  Location(..), RoutingInfo, Node(..), route, Result(..)
   ) where
 
-import Control.Applicative ( (<$>) )
+import Control.Applicative ( (<$>), (<*>) )
 import Control.Concurrent.STM
+import Data.Binary
 import Data.List ( minimumBy )
 
 class (Eq i, Show i) => Location i where
@@ -15,53 +14,59 @@ class (Eq i, Show i) => Location i where
 instance Location Int where
   distance l1 l2 = (fromIntegral $ abs (l1 - l2)) / fromIntegral (maxBound :: Int)
 
-class (Location l) => Message m l where
-  marked :: (Location l) => m -> l -> Bool     -- ^ already visited the specified location?
-  mark   :: (Location l) => m -> l -> m        -- ^ mark the location as visited and get updated message
-  target :: (Location l) => m -> l             -- ^ where should this message go?
+data RoutingInfo l = RI
+                     { _riMarked :: [l]
+                     , riTarget :: l   -- ^ where should this message go?
+                     }
 
-newtype IntMsg = IntMsg (Int, [Int])
+instance (Show l) => Show (RoutingInfo l) where
+  show (RI _ l) = "message to " ++ show l
 
-instance Message IntMsg Int where
-  target (IntMsg (t, _))    = t
-  marked (IntMsg (_, ms)) l = elem l ms
-  mark   (IntMsg (t, ms)) l = IntMsg (t, l:ms)
+instance Binary l => Binary (RoutingInfo l) where
+  put (RI ms l) = put ms >> put l
+  get = RI <$> get <*> get
 
-instance Show IntMsg where
-  show (IntMsg (t, _)) = "Message {target=" ++ (show t) ++ "}"
+-- |
+-- already visited the specified location?
+marked :: (Location l) => RoutingInfo l -> l -> Bool 
+marked (RI ls _) l = l `elem` ls
 
-data Node m l = Node
-                { location   :: l
-                , success    :: m -> STM Bool
-                , neighbours :: STM [Node m l]
-                , addPred    :: (Node m l) -> STM ()
-                , popPred    :: STM (Maybe (Node m l))
-                }
+-- |
+-- mark the location as visited and get updated message
+mark :: (Location l) => RoutingInfo l -> l -> RoutingInfo l
+mark (RI ls t) l = RI (l:ls) t
 
-instance (Show l) => Show (Node m l) where
+data Node l = Node
+              { location   :: l
+              , success    :: RoutingInfo l -> STM Bool
+              , neighbours :: STM [Node l]
+              , addPred    :: (Node l) -> STM ()
+              , popPred    :: STM (Maybe (Node l))
+              }
+
+instance (Show l) => Show (Node l) where
   show n = "Node {l=" ++ (show $ location n) ++ "}"
-                
-data Result n m = Fail         -- ^ we failed with this message
-                | Success      -- ^ the message was dealt with
-                | Forward n m  -- ^ pass on to this peer
-                | Backtrack n m  -- ^ 
 
-instance (Show m, Show n) => Show (Result n m) where
+data Result l = Fail                               -- ^ we failed with this message
+              | Success                            -- ^ the message was dealt with
+              | Forward (Node l) (RoutingInfo l)   -- ^ pass on to this peer
+              | Backtrack (Node l) (RoutingInfo l) -- ^ 
+
+instance (Show l) => Show (Result l) where
   show Fail = "Fail"
   show Success = "Success"
   show (Forward n m) = "Forward " ++ (show m) ++ " to " ++ show n
   show (Backtrack n m) = "Backtrack " ++ (show m) ++ " to " ++ show n
   
-closest :: (Message m l) => m -> [Node m l] -> Node m l
-closest m ns = minimumBy (\n1 n2 -> cmp (location n1) (location n2)) ns where
+closest :: (Location l) => l -> [Node l] -> Node l
+closest t ns = minimumBy (\n1 n2 -> cmp (location n1) (location n2)) ns where
   cmp l1 l2 = compare d1 d2 where (d1, d2) = (distance t l1, distance t l2)
-  t = target m
                            
-route :: (Location l, Message m l)
-  => Node m l         -- ^ current node
-  -> Maybe (Node m l) -- ^ previous node, or Nothing if we're backtracking or we're the originator
-  -> m                -- ^ message being routed
-  -> STM (Result (Node m l) m)
+route :: (Location l)
+  => Node l         -- ^ current node
+  -> Maybe (Node l) -- ^ previous node, or Nothing if we're backtracking or we're the originator
+  -> RoutingInfo l  -- ^ message being routed
+  -> STM (Result l)
   
 route v prev m = success v m >>= \done ->
   if done
@@ -78,9 +83,9 @@ route v prev m = success v m >>= \done ->
       
     if (not . null) s
       then do
-        let next = closest m s
+        let next = closest (riTarget m) s
                  
-        if distance (location next) (target m) >= distance (location v) (target m)
+        if distance (location next) (riTarget m) >= distance (location v) (riTarget m)
           then return $ Forward next mm
           else return $ Forward next m
       else do
