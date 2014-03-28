@@ -8,6 +8,8 @@ import Control.Monad ( when )
 import qualified Data.Configurator as CFG
 import Network ( withSocketsDo )
 import Network.Wai.Handler.Warp as Warp
+import System.Directory ( getAppUserDataDirectory )
+import System.FilePath ( (</>) )
 
 import Freenet as FN
 import Freenet.Fproxy as FP
@@ -20,7 +22,9 @@ import Peers as P
 main :: IO ()
 main = withSocketsDo $ do
   RD.initRijndael
-  cfg <- CFG.load [CFG.Required "configs/test.cfg"]
+
+  appDir <- getAppUserDataDirectory "ads"
+  cfg <- CFG.load [CFG.Required $ appDir </> "config"]
 
   let
     fnConfig = (CFG.subconfig "freenet" cfg)
