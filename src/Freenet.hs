@@ -37,8 +37,9 @@ logI m = infoM "freenet" m
 initFn :: CFG.Config -> IO Freenet
 initFn cfg = do
   -- datastore
-  dsdir       <- CFG.require cfg "datastore"
-  chkStore    <- FS.mkStoreFile (undefined :: ChkFound) (dsdir </> "store-chk") (1024 * 16)
+  dsdir       <- CFG.require cfg "datastore.directory"
+  chkCount    <- CFG.require cfg "datastore.chk-count"
+  chkStore    <- FS.mkStoreFile (undefined :: ChkFound) (dsdir </> "store-chk") chkCount
   
   chkIncoming <- newBroadcastTChanIO
   sskIncoming <- newBroadcastTChanIO
