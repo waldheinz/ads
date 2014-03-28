@@ -4,6 +4,7 @@
 module Main ( main ) where
 
 import Control.Concurrent.STM
+import Control.Monad ( when )
 import qualified Data.Configurator as CFG
 import Network ( withSocketsDo )
 import Network.Wai.Handler.Warp as Warp
@@ -21,17 +22,24 @@ main = withSocketsDo $ do
   RD.initRijndael
   cfg <- CFG.load [CFG.Required "configs/test.cfg"]
 
+  let
+    fnConfig = (CFG.subconfig "freenet" cfg)
+  
   LOG.initLogging $ CFG.subconfig "logging" cfg
   infoM "main" "Starting up..."
   
   ni <- getNodeInfo (CFG.subconfig "node" cfg)
   p <- atomically mkPeers
-  fn <- FN.initFn (CFG.subconfig "freenet" cfg)
+  fn <- FN.initFn fnConfig
   
   nodeListen (CFG.subconfig "node.listen" cfg) ni p
-
-  Warp.run 8081 (FP.fproxy fn)
   
+  -- fproxy
+  fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"
+  when fproxyEnabled $ do
+    fpPort <- CFG.require fnConfig "fproxy.port"
+    Warp.run fpPort $ FP.fproxy fn
+    
   {-
   void $ forkIO $ N.connectNode ni ("127.0.0.1", 1234) $ \n -> do
     print n

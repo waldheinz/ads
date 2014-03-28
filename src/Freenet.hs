@@ -55,6 +55,7 @@ initFn cfg = do
       comp <- FC.initCompanion ccfg (offerChk fn True) (offerSsk fn True)
       return $ fn { fnCompanion = Just comp }
 
+    
 offerSsk :: Freenet -> Bool -> SskFound -> STM ()
 offerSsk fn _ df = do
   -- write to our store
