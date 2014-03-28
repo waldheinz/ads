@@ -29,46 +29,34 @@ sigHandler s = do
 main :: IO ()
 main = withSocketsDo $ do
   RD.initRijndael
-
+  
+  -- install signal handler for shutdown handling
   shutdown <- newTVarIO False
-
   void $ installHandler sigINT (Catch $ sigHandler shutdown) Nothing
   void $ installHandler sigTERM (Catch $ sigHandler shutdown) Nothing
-  
+
+  -- initialize logging
   appDir <- getAppUserDataDirectory "ads"
   cfg <- CFG.load [CFG.Required $ appDir </> "config"]
-
+  LOG.initLogging $ CFG.subconfig "logging" cfg
+  
   let
     fnConfig = (CFG.subconfig "freenet" cfg)
   
-  LOG.initLogging $ CFG.subconfig "logging" cfg
   infoM "main" "Starting up..."
-  
+
+  -- start our node
   ni <- getNodeInfo (CFG.subconfig "node" cfg)
   p <- atomically mkPeers
   fn <- FN.initFn fnConfig
   
   nodeListen (CFG.subconfig "node.listen" cfg) ni p
   
-  -- fproxy
+  -- start fproxy
   fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"
   when fproxyEnabled $ do
     fpPort <- CFG.require fnConfig "fproxy.port"
     void $ forkIO $ Warp.run fpPort $ FP.fproxy fn
 
+  -- wait for shutdown
   atomically $ readTVar shutdown >>= check
-    
-    
-  {-
-  void $ forkIO $ N.connectNode ni ("127.0.0.1", 1234) $ \n -> do
-    print n
-  
-  let
-    uri = "CHK@WwKhAnEKnmJMiHZ-Cs7YTJ8jRS505-WLoVoTK4ZadVg,8-kP5bnx9tpQoMEXm1kQibnblvrQh0hi8-7Bii4uDrY,AAMC--8/088748722_Bob7z854_123_12lo.jpg"
-    
-  case FU.parseUri uri of
-    Left e -> error $ show e
-    Right u -> FN.fetchUri fn u >>= \r -> case r of
-      Left e -> error $ T.unpack e
-      Right bs -> BSL.writeFile "fetched" bs
--}
