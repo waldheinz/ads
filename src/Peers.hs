@@ -24,7 +24,7 @@ import Node as N
 import Types
 
 type PeerIO a = (Source IO (Message a), Sink (Message a) IO ())
-type ConnectFunction a = Peer a -> IO (Either String (PeerIO a))
+type ConnectFunction a = Peer a -> ((Either String (PeerIO a)) -> IO ()) -> IO ()
 
 ----------------------------------------------------------------
 -- the peers list
@@ -80,15 +80,16 @@ maintainConnections identity connect peers = forever $ do
         let result'' = head result'
         modifyTVar (peersConnecting peers) ((:) result'')
         return result''
-        
+
   logI $ "connecting to " ++ show shouldConnect
-  cresult <- connect shouldConnect
-  case cresult of
-    Left e -> do
-      logW $ "error connecting: " ++ e ++ " on " ++ show shouldConnect
-      atomically $ modifyTVar (peersConnecting peers) (filter ((==) shouldConnect))
-    Right (src, sink) -> do
-      logI "connected!"
-      runNode src sink (Just identity) $ \node -> do
-        print node
+  connect shouldConnect $ \cresult -> do
+    case cresult of
+      Left e -> do
+        logW $ "error connecting: " ++ e ++ " on " ++ show shouldConnect
+        atomically $ modifyTVar (peersConnecting peers) (filter ((==) shouldConnect))
+      Right (src, sink) -> do
+        logI "connected!"
+        runNode src sink (Just identity) $ \node -> do
+          print node
+  
   

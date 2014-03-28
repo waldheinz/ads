@@ -72,16 +72,13 @@ nodeListen cfg ni p = do
       atomically $ P.addPeer p n >> N.enqMessage n (MSG.Hello ni)
       logI $ "added peer " ++ show n
 
-  infoM "net" $ "Node listening on " ++ host ++ ":" ++ show port
+  infoM "net" $ "node listening on " ++ host ++ ":" ++ show port
 
 tcpConnect :: ConnectFunction TcpAddressInfo
-tcpConnect peer = do
+tcpConnect peer handler = do
   let (AI addrs) = peerAddress peer
   if null addrs
-    then return $ Left "no addresses"
-    else do
-      let
-        TcpAddress host port = head addrs -- TODO: deal with multiple adresses
+    then handler $ Left "no addresses"
+    else let TcpAddress host port = head addrs in do -- TODO: deal with multiple adresses
       runTCPClient (clientSettings port $ BSC.pack host) $ \ad -> do
-        return $ Right (appSource ad $= conduitDecode, conduitEncode =$ appSink ad)
---        
+        handler $ Right (appSource ad $= conduitDecode, conduitEncode =$ appSink ad)
