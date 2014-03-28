@@ -3,9 +3,12 @@
 
 module Main ( main ) where
 
+import Control.Applicative ( (<$>) )
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
 import Control.Monad ( void, when )
+import Data.Aeson
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import Network ( withSocketsDo )
 import Network.Wai.Handler.Warp as Warp
@@ -18,8 +21,10 @@ import Freenet.Fproxy as FP
 import Freenet.Rijndael as RD
 import Logging as LOG
 import Net
-import Node as N
 import Peers as P
+
+logE :: String -> IO ()
+logE m = errorM "main" m
 
 sigHandler :: TVar Bool -> IO ()
 sigHandler s = do
@@ -46,11 +51,15 @@ main = withSocketsDo $ do
   infoM "main" "Starting up..."
 
   -- start our node
-  ni <- getNodeInfo (CFG.subconfig "node" cfg)
-  p <- atomically mkPeers
-  fn <- FN.initFn fnConfig
+  mi <- eitherDecode <$> BSL.readFile (appDir </> "identity")
   
-  nodeListen (CFG.subconfig "node.listen" cfg) ni p
+  case mi of
+    Left e -> logE $ "error reading node identity: " ++ e
+    Right ni -> do
+      peers <- initPeers ni tcpConnect appDir
+      nodeListen (CFG.subconfig "node.listen" cfg) ni peers
+    
+  fn <- FN.initFn fnConfig
   
   -- start fproxy
   fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"

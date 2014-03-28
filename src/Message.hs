@@ -8,8 +8,8 @@ import Data.Binary
 
 import Types
 
-data Message
-     = Hello NodeInfo
+data (Show a) => Message a
+     = Hello (Peer a)
      | Ping
      deriving ( Show )
 {-
@@ -30,7 +30,7 @@ putPut t p
     bs = encode p
     len = BSL.length bs
 -}
-instance Binary Message where
+instance (Binary a, Show a) => Binary (Message a) where
   put (Hello ni) = putHeader 1 >> put ni
   put Ping = putHeader 2
 

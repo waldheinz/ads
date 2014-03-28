@@ -2,10 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Node (
-  -- * static Node information
-  getNodeInfo,
-  
-  Node, connectNode, enqMessage,
+  Node, nodePeer, enqMessage,
   
   -- * incoming / outgoig messages
   runNode
@@ -15,44 +12,29 @@ import Control.Concurrent ( forkIO, myThreadId, ThreadId )
 import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
 import Control.Monad ( void )
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Base16 as HEX
-import qualified Data.ByteString.Char8 as BSC
 import qualified Data.Conduit as C
-import qualified Data.Conduit.Network as C
 import qualified Data.Conduit.List as C
-import qualified Data.Conduit.Serialization.Binary as C
 import qualified Data.Conduit.TQueue as C
-import qualified Data.Configurator as CFG
-import qualified Data.Configurator.Types as CFG
 
 import Message as MSG
 import Types
 
 -------------------------------------------------------------------------
--- NodeInfo related
+-- Nodes
 -------------------------------------------------------------------------
 
--- | extracts our identity from the config
-getNodeInfo :: CFG.Config -> IO NodeInfo
-getNodeInfo cfg = do
-  nid <- CFG.require cfg "id"
-  let (nid', rest) = HEX.decode nid
-
-  return $! NodeInfo nid'
-
-data Node
+data Node a
   = Node
-    { nInfo    :: NodeInfo
+    { nodePeer :: Peer a
     , _nThread :: ThreadId
-    , nQueue   :: STM.TBMQueue Message -- ^ outgoing message queue
+    , nQueue   :: STM.TBMQueue (Message a) -- ^ outgoing message queue
     }
 
-instance Show (Node) where
-  show n = "Node {ni = " ++ show (nInfo n) ++ " }"
+instance (Show a) => Show (Node a) where
+  show n = "Node {peer = " ++ show (nodePeer n) ++ " }"
   
 -- | puts a message on the Node's outgoing message queue       
-enqMessage :: Node -> MSG.Message -> STM ()
+enqMessage :: Node a -> MSG.Message a -> STM ()
 enqMessage n m = writeTBMQueue (nQueue n) m
 
 ------------------------------------------------------------------------------
@@ -61,33 +43,25 @@ enqMessage n m = writeTBMQueue (nQueue n) m
 
 -- ^ handle a node that is currently connected to us
 runNode
-  :: C.Source IO BS.ByteString
-  -> C.Sink BS.ByteString IO ()
-  -> Maybe NodeInfo             -- ^ our NodeInfo, if this is an outbound connection
-  -> (Node -> IO ())            -- ^ act upon the node once handshake has completed
+  :: (Show a)
+  => C.Source IO (Message a)
+  -> C.Sink (Message a) IO ()
+  -> Maybe (Peer a)           -- ^ our NodeInfo, if this is an outbound connection
+  -> (Node a -> IO ())        -- ^ act upon the node once handshake has completed
   -> IO ()
 runNode src sink mni connected = do
-  mq <- STM.newTBMQueueIO 5 :: IO (STM.TBMQueue Message)
+  mq <- STM.newTBMQueueIO 5 :: IO (STM.TBMQueue (Message a))
   
   case mni of
     Nothing -> return ()
     Just ni -> atomically $ writeTBMQueue mq (MSG.Hello ni)
 
-  void $ forkIO $ src C.$$ C.conduitDecode C.=$ (C.mapM_ $ \msg -> do
+  void $ forkIO $ src C.$$ (C.mapM_ $ \msg -> do
     case msg of
-      MSG.Hello ni -> do
-        print $ "got a NI: " ++ show ni
+      MSG.Hello p -> do
+        print $ "got a Peer: " ++ show p
         t <- myThreadId
-        connected $ Node ni t mq
+        connected $ Node p t mq
       x -> print x
                                 )
-  C.sourceTBMQueue mq C.$= C.conduitEncode C.$$ sink
-
-connectNode
-  :: NodeInfo      -- ^ our NodeInfo
-  -> (String, Int) -- ^ (host, port)
-  -> (Node -> IO ()) -- ^ act when handshake completed
-  -> IO ()
-connectNode ni (host, port) connected =
-  C.runTCPClient (C.clientSettings port $ BSC.pack host) $ \ad -> do
-    runNode (C.appSource ad) (C.appSink ad) (Just ni) connected
+  C.sourceTBMQueue mq C.$$ sink
