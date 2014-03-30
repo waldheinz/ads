@@ -50,6 +50,8 @@ main = withSocketsDo $ do
   
   infoM "main" "Starting up..."
 
+  fn <- FN.initFn fnConfig
+
   -- start our node
   mi <- eitherDecode <$> BSL.readFile (appDir </> "identity")
   
@@ -58,8 +60,6 @@ main = withSocketsDo $ do
     Right ni -> do
       peers <- initPeers ni tcpConnect appDir
       nodeListen (CFG.subconfig "node.listen" cfg) ni peers
-    
-  fn <- FN.initFn fnConfig
   
   -- start fproxy
   fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"

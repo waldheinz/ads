@@ -26,7 +26,7 @@ import qualified Data.Vector as V
 
 import Logging
 import qualified Message as MSG
-import Node as N
+--import Node as N
 import Peers as P
 import Types
 
@@ -68,8 +68,8 @@ nodeListen cfg ni p = do
     s = serverSettings port (fromString host)
   void $ forkIO $ runTCPServer s $ \ad -> do
     infoM "net" $ "incoming connection from " ++ (show $ appSockAddr ad)
-    N.runNode (appSource ad $= conduitDecode, conduitEncode =$ appSink ad) Nothing $ \n -> do
-      atomically $ P.addPeer p n >> N.enqMessage n (MSG.Hello ni)
+    P.runPeerNode (appSource ad $= conduitDecode, conduitEncode =$ appSink ad) Nothing $ \n -> do
+      atomically $ P.addPeer p n >> P.enqMessage n (MSG.Hello ni)
       logI $ "added " ++ show n
 
   infoM "net" $ "node listening on " ++ host ++ ":" ++ show port

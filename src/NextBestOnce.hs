@@ -2,7 +2,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module NextBestOnce (
-  Location(..), RoutingInfo, Message(..),
+  Location(..), RoutingInfo,-- Message(..),
   Node(..), route, Result(..)
   ) where
 
@@ -32,8 +32,8 @@ instance Binary l => Binary (RoutingInfo l) where
 
 -- |
 -- A message carrying a RoutingInfo
-class (Location l) => Message m l where
-  routingInfo       :: m -> RoutingInfo l
+--class (Location l) => Message m l where
+--  routingInfo       :: m -> RoutingInfo l
 --  updateRoutingInfo :: m -> RoutingInfo m -> m
 
 -- |
@@ -49,10 +49,12 @@ mark (RI mid ls t) l = RI mid (l:ls) t
 --type ActiveMessage m l  = (Message m, RoutingInfo l)
 
 data Node l m = Node
-              { location   :: l
-              , success    :: RoutingInfo l -> STM Bool
-              , neighbours :: STM [Node l m]
-              , msgPreds   :: TVar (IntMap m)
+              { location    :: l
+              , success     :: RoutingInfo l -> STM Bool
+              , neighbours  :: STM [Node l m]
+              , msgPreds    :: TVar (IntMap m)
+              , routingInfo :: m -> RoutingInfo l
+              , updateRoutingInfo :: m -> RoutingInfo l -> m
 --              , addPred    :: Node l  -> STM ()
 --              , popPred    :: STM (Maybe (Node l))
               }

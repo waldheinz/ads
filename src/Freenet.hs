@@ -3,6 +3,9 @@
 
 module Freenet (
   Freenet, initFn, requestData,
+
+  -- * Talking to other nodes
+  handleMessage
   ) where
 
 import Control.Concurrent ( forkIO )
@@ -18,6 +21,7 @@ import System.Log.Logger
 import Freenet.Chk
 import qualified Freenet.Companion as FC
 import Freenet.Keys
+import Freenet.Messages
 import Freenet.Ssk
 import qualified Freenet.Store as FS
 import Freenet.Types
@@ -55,7 +59,9 @@ initFn cfg = do
       comp <- FC.initCompanion ccfg (offerChk fn True) (offerSsk fn True)
       return $ fn { fnCompanion = Just comp }
 
-    
+handleMessage :: Freenet -> Message -> IO ()
+handleMessage fn msg = print ("freenet handleMessage", msg)
+
 offerSsk :: Freenet -> Bool -> SskFound -> STM ()
 offerSsk fn _ df = do
   -- write to our store

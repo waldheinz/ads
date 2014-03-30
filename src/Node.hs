@@ -2,10 +2,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Node (
-  Node, nodePeer, enqMessage,
+  -- * our node
+  Node(..),
   
-  -- * incoming / outgoig messages
-  runNode
   ) where
 
 import Control.Concurrent ( forkIO, myThreadId, ThreadId )
@@ -17,49 +16,19 @@ import qualified Data.Conduit.List as C
 import qualified Data.Conduit.TQueue as C
 
 import Message as MSG
+import Peers
 import Types
 
 -------------------------------------------------------------------------
--- Nodes
+-- Node
 -------------------------------------------------------------------------
 
-data Node a
-  = Node
-    { nodePeer :: Peer a
-    , _nThread :: ThreadId
-    , nQueue   :: STM.TBMQueue (Message a) -- ^ outgoing message queue
-    }
+data Node = Node
+            {
+            } deriving ( Show )
 
-instance (Show a) => Show (Node a) where
-  show n = "Node {peer = " ++ show (nodePeer n) ++ " }"
+handleMessage :: (Show a) => Node -> PeerNode a -> MSG.Message a -> IO ()
+handleMessage n pn msg = do
+  print ("incoming message", n, pn, msg)
+  return ()
   
--- | puts a message on the Node's outgoing message queue       
-enqMessage :: Node a -> MSG.Message a -> STM ()
-enqMessage n m = writeTBMQueue (nQueue n) m
-
-------------------------------------------------------------------------------
--- Handshake
-------------------------------------------------------------------------------
-
--- ^ handle a node that is currently connected to us
-runNode
-  :: (Show a)
-  => MessageIO a
-  -> Maybe (Peer a)           -- ^ our NodeInfo, if this is an outbound connection
-  -> (Node a -> IO ())        -- ^ act upon the node once handshake has completed
-  -> IO ()
-runNode (src, sink) mni connected = do
-  mq <- STM.newTBMQueueIO 5 :: IO (STM.TBMQueue (Message a))
-  
-  case mni of
-    Nothing -> return ()
-    Just ni -> atomically $ writeTBMQueue mq (MSG.Hello ni)
-
-  void $ forkIO $ src C.$$ (C.mapM_ $ \msg -> do
-    case msg of
-      MSG.Hello p -> do
-        t <- myThreadId
-        connected $ Node p t mq
-      x -> print x
-                                )
-  C.sourceTBMQueue mq C.$$ sink

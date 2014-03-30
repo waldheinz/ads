@@ -9,6 +9,7 @@ import Control.Applicative ( (<$>), (<*>) )
 import Data.Binary
 import Data.Conduit
 
+import qualified Freenet.Messages as FNM
 import qualified NextBestOnce as NBO
 import Types
 
@@ -23,6 +24,7 @@ data (Show a) => Message a
      = Hello (Peer a)
      | Ping
      | Routed RoutedMessage
+     | FreenetMessage FNM.Message
      deriving ( Show )
 
 -- |
@@ -35,10 +37,6 @@ data RoutedMessage = RM
 instance Show RoutedMessage where
   show (RM p i) = "routed to " ++ show i
 
-instance NBO.Message RoutedMessage NodeId where
-  routingInfo = rmInfo
-  
-  
 putHeader :: Word8 -> Put
 putHeader t = put t
 

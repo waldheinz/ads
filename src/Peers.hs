@@ -5,12 +5,22 @@
 -- Maintain connections to other peers.
 module Peers (
   ConnectFunction,
-  Peers, initPeers, addPeer
+  Peers, initPeers, addPeer,
+  
+  -- * other nodes we're connected to
+  PeerNode, nodePeer, enqMessage,
+  
+  -- * incoming / outgoig messages
+  runPeerNode
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
+import Control.Concurrent.STM.TBMQueue
+import qualified Data.Conduit as C
+import qualified Data.Conduit.List as C
+import qualified Data.Conduit.TQueue as C
 import Control.Monad ( forever, void )
 import Data.Aeson
 import qualified Data.ByteString.Lazy as BSL
@@ -19,7 +29,7 @@ import System.FilePath ( (</>) )
 import System.Log.Logger
 
 import Message
-import Node as N
+--import Node as N
 import Types
 
 type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
@@ -27,11 +37,11 @@ type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> I
 ----------------------------------------------------------------
 -- the peers list
 ----------------------------------------------------------------
-  
+
 data Peers a = Peers
-             { peersConnected  :: TVar [Node a] -- ^ peers we're currently connected to
-             , peersConnecting :: TVar [Peer a] -- ^ peers we're currently trying to connect to
-             , peersKnown      :: TVar [Peer a] -- ^ all peers we know about, includes above
+             { peersConnected  :: TVar [PeerNode a] -- ^ peers we're currently connected to
+             , peersConnecting :: TVar [Peer a]     -- ^ peers we're currently trying to connect to
+             , peersKnown      :: TVar [Peer a]     -- ^ all peers we know about, includes above
              }
 
 logI :: String -> IO ()
@@ -56,7 +66,7 @@ initPeers identity connect dataDir = do
   void $ forkIO $ maintainConnections identity connect ps
   return ps
 
-addPeer :: Peers a -> Node a -> STM ()
+addPeer :: Peers a -> PeerNode a -> STM ()
 addPeer p n = modifyTVar' (peersConnected p) ((:) n)
 
 maintainConnections :: (Show a) => Peer a -> ConnectFunction a -> Peers a -> IO ()
@@ -70,7 +80,7 @@ maintainConnections identity connect peers = forever $ do
   
     let
       result = known \\ cting
-      result' = result \\ (map N.nodePeer connected)
+      result' = result \\ (map nodePeer connected)
 
     if null result'
       then retry
@@ -87,7 +97,50 @@ maintainConnections identity connect peers = forever $ do
         atomically $ modifyTVar (peersConnecting peers) (filter ((==) shouldConnect))
       Right msgio -> do
         logI "connected!"
-        runNode msgio (Just identity) $ \node -> do
+        runPeerNode msgio (Just identity) $ \node -> do
           print node
   
   
+-------------------------------------------------------------------------
+-- Peer Nodes
+-------------------------------------------------------------------------
+
+data PeerNode a
+  = PeerNode
+    { nodePeer :: Peer a
+    , nQueue   :: TBMQueue (Message a) -- ^ outgoing message queue to this node
+    }
+
+instance (Show a) => Show (PeerNode a) where
+  show n = "Node {peer = " ++ show (nodePeer n) ++ " }"
+  
+-- | puts a message on the Node's outgoing message queue       
+enqMessage :: PeerNode a -> Message a -> STM ()
+enqMessage n m = writeTBMQueue (nQueue n) m
+
+------------------------------------------------------------------------------
+-- Handshake
+------------------------------------------------------------------------------
+
+-- ^ handle a node that is currently connected to us
+runPeerNode
+  :: (Show a)
+  => MessageIO a            -- ^ the (source, sink) pair to talk to the peer
+  -> Maybe (Peer a)         -- ^ our NodeInfo, if this is an outbound connection
+  -> (PeerNode a -> IO ())  -- ^ act upon the node once handshake has completed
+  -> IO ()
+runPeerNode (src, sink) mni connected = do
+  mq <- newTBMQueueIO 5
+  
+  -- enqueue the obligatory Hello message, if this is an
+  -- outgoing connection
+  case mni of
+    Nothing -> return ()
+    Just ni -> atomically $ writeTBMQueue mq (Hello ni)
+
+  void $ forkIO $ src C.$$ (C.mapM_ $ \msg -> do
+    case msg of
+      Hello p -> connected $ PeerNode p mq
+      x       -> print ("unhandled message", x)
+                                )
+  C.sourceTBMQueue mq C.$$ sink
