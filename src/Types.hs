@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Types (
-  NodeId, NodeInfo(..),
+  NodeId, mkNodeId', NodeInfo(..),
 
   Peer(..), mkPeer
   ) where
@@ -13,9 +13,11 @@ import Data.Aeson
 import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
+import Data.Bits ( shiftL )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as HEX
 import qualified Data.ByteString.Char8 as BSC
+import Data.Ratio ( (%) )
 import Data.Text.Encoding ( encodeUtf8 )
 
 import qualified NextBestOnce as NBO
@@ -37,8 +39,19 @@ instance FromJSON NodeId where
   parseJSON (String s) = pure $ NodeId $ fst (HEX.decode $ encodeUtf8 s)
   parseJSON _ = mzero
 
+nodeIdToInteger :: NodeId -> Integer
+nodeIdToInteger (NodeId bs) = BS.foldl' (\i bb -> (i `shiftL` 8) + fromIntegral bb) 0 bs
+
+maxNodeId :: Integer
+maxNodeId = 255 ^ (32 :: Integer)
+
 instance NBO.Location NodeId where
-  distance = error "distance for NodeId"
+  toDouble nid = fromRational $ (nodeIdToInteger nid) % maxNodeId
+
+mkNodeId' :: BS.ByteString -> NodeId
+mkNodeId' bs
+  | BS.length bs /= 32 = error "mkNodeId': expected 32 bytes"
+  | otherwise = NodeId bs
 
 ----------------------------------------------------------------------
 -- Node Info
@@ -59,7 +72,7 @@ instance FromJSON NodeInfo where
   
 
 ----------------------------------------------------------------
--- a Peer
+-- Peers / Peer Nodes
 ----------------------------------------------------------------
 
 
@@ -83,3 +96,4 @@ instance (Binary a, Show a) => Binary (Peer a) where
 
 mkPeer :: (Show a) => NodeInfo -> a -> Peer a
 mkPeer ni addr = Peer ni addr
+

@@ -6,7 +6,7 @@ module Freenet.Types (
   DataRequest(..), DataFound(..), StorePersistable(..)
   ) where
 
-import Control.Applicative ( (<$>) )
+import Control.Applicative ( (<$>), (<*>) )
 import Data.Binary
 import Data.Binary.Put
 import Data.Binary.Get
@@ -62,6 +62,18 @@ data DataRequest
        }  
        deriving ( Show )
 
+instance Binary DataRequest where
+  put (ChkRequest l h) = putWord8 1 >> put l >> put h
+  put (SskRequest pk eh a) = putWord8 2 >> put pk >> put eh >> put a
+
+  get = do
+    tp <- getWord8
+
+    case tp of
+      1 -> ChkRequest <$> get <*> get
+      2 -> SskRequest <$> get <*> get <*> get
+      x -> fail $ "unknown data request type " ++ show x
+      
 class DataFound a => StorePersistable a where
   storeSize :: a -> Int
   storePut  :: a -> Put

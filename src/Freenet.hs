@@ -18,6 +18,10 @@ import qualified Data.Text as T
 import System.FilePath ( (</>) )
 import System.Log.Logger
 
+import qualified Message as MSG
+import qualified NextBestOnce as NBO
+import Types
+
 import Freenet.Chk
 import qualified Freenet.Companion as FC
 import Freenet.Keys
@@ -27,19 +31,20 @@ import qualified Freenet.Store as FS
 import Freenet.Types
 import Freenet.URI
 
-data Freenet = FN
+data Freenet a = FN
                { fnChkStore    :: FS.StoreFile ChkFound
                , fnCompanion   :: Maybe FC.Companion
                , fnIncomingChk :: TChan ChkFound
                , fnIncomingSsk :: TChan SskFound
+               , fnMsgSend     :: NodeId -> MSG.Message a -> IO ()
                }
 
 logI :: String -> IO ()
 logI m = infoM "freenet" m
 
 -- | initializes Freenet subsystem
-initFn :: CFG.Config -> IO Freenet
-initFn cfg = do
+initFn :: CFG.Config -> (NodeId -> MSG.Message a -> IO ()) -> IO (Freenet a)
+initFn cfg send = do
   -- datastore
   dsdir       <- CFG.require cfg "datastore.directory"
   chkCount    <- CFG.require cfg "datastore.chk-count"
@@ -48,7 +53,7 @@ initFn cfg = do
   chkIncoming <- newBroadcastTChanIO
   sskIncoming <- newBroadcastTChanIO
   
-  let fn = FN chkStore Nothing chkIncoming sskIncoming
+  let fn = FN chkStore Nothing chkIncoming sskIncoming send
 
   -- companion
   let ccfg = CFG.subconfig "companion" cfg
@@ -59,10 +64,10 @@ initFn cfg = do
       comp <- FC.initCompanion ccfg (offerChk fn True) (offerSsk fn True)
       return $ fn { fnCompanion = Just comp }
 
-handleMessage :: Freenet -> Message -> IO ()
+handleMessage :: Freenet a -> FreenetMessage -> IO ()
 handleMessage fn msg = print ("freenet handleMessage", msg)
 
-offerSsk :: Freenet -> Bool -> SskFound -> STM ()
+offerSsk :: Freenet a -> Bool -> SskFound -> STM ()
 offerSsk fn _ df = do
   -- write to our store
 --  when toStore $ FS.putData (fnSskStore fn) df
@@ -70,7 +75,7 @@ offerSsk fn _ df = do
   -- broadcast arrival
   writeTChan (fnIncomingSsk fn) df
 
-offerChk :: Freenet -> Bool -> ChkFound -> STM ()
+offerChk :: Freenet a -> Bool -> ChkFound -> STM ()
 offerChk fn toStore df = do
   -- write to our store
   when toStore $ FS.putData (fnChkStore fn) df
@@ -78,7 +83,7 @@ offerChk fn toStore df = do
   -- broadcast arrival
   writeTChan (fnIncomingChk fn) df
 
-handleDataRequest :: Freenet -> DataRequest -> IO ()
+handleDataRequest :: Freenet a -> DataRequest -> IO ()
 handleDataRequest fn dr = do
   fromStore <- case dr of
     (ChkRequest { }) -> FS.getData (fnChkStore fn) dr
@@ -86,14 +91,18 @@ handleDataRequest fn dr = do
   
   case fromStore of
     Just df -> atomically $ offerChk fn False df
-    Nothing -> case fnCompanion fn of
-      Nothing -> return ()
-      Just c  -> FC.get c dr
+    Nothing -> do
+      let nId = mkNodeId' $ unKey $ dataRequestLocation dr
+      fnMsgSend fn nId (MSG.FreenetMessage $ DataRequestMsg dr)
+      
+      case fnCompanion fn of
+        Nothing -> return ()
+        Just c  -> FC.get c dr
 
 waitKeyTimeout :: DataFound f => TChan f -> Key -> IO (TMVar (Maybe f))
 waitKeyTimeout chan loc = do
   bucket  <- newEmptyTMVarIO
-  timeout <- registerDelay $ 10 * 1000 * 1000
+  timeout <- registerDelay $ 30 * 1000 * 1000
   chan'    <- atomically $ dupTChan chan
   
   -- wait for data or timeout
@@ -103,7 +112,7 @@ waitKeyTimeout chan loc = do
 
   return bucket
 
-requestData :: Freenet -> URI -> IO (Either T.Text BSL.ByteString)
+requestData :: Freenet a -> URI -> IO (Either T.Text BSL.ByteString)
 requestData fn uri = logI ("data request for " ++ show uri) >> let dr = toDataRequest uri in case dr of
   ChkRequest {} -> do
     let 

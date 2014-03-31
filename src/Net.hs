@@ -15,7 +15,6 @@ import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import Data.String ( fromString )
 import Control.Concurrent ( forkIO )
-import Control.Concurrent.STM
 import Control.Monad ( void )
 import Data.Aeson
 import Data.Binary
@@ -25,9 +24,7 @@ import Data.Conduit.Serialization.Binary
 import qualified Data.Vector as V
 
 import Logging
-import qualified Message as MSG
---import Node as N
-import Peers as P
+import Node
 import Types
 
 logI :: String -> IO ()
@@ -59,18 +56,17 @@ instance FromJSON TcpAddressInfo where
   
 -- |
 -- listens on the configured addresses and accepts incomping peer connections
-nodeListen :: CFG.Config -> Peer TcpAddressInfo -> P.Peers TcpAddressInfo -> IO ()
-nodeListen cfg ni p = do
+nodeListen :: CFG.Config -> Node TcpAddressInfo -> IO ()
+nodeListen cfg node = do
   host <- CFG.require cfg "host"
   port <- CFG.require cfg "port"
 
   let
     s = serverSettings port (fromString host)
+    
   void $ forkIO $ runTCPServer s $ \ad -> do
-    infoM "net" $ "incoming connection from " ++ (show $ appSockAddr ad)
-    P.runPeerNode (appSource ad $= conduitDecode, conduitEncode =$ appSink ad) Nothing $ \n -> do
-      atomically $ P.addPeer p n >> P.enqMessage n (MSG.Hello ni)
-      logI $ "added " ++ show n
+    logI $ "incoming connection from " ++ (show $ appSockAddr ad)
+    runPeerNode node (appSource ad $= conduitDecode, conduitEncode =$ appSink ad) Nothing
 
   infoM "net" $ "node listening on " ++ host ++ ":" ++ show port
 

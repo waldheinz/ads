@@ -21,7 +21,7 @@ import Freenet.Fproxy as FP
 import Freenet.Rijndael as RD
 import Logging as LOG
 import Net
-import Peers as P
+import Node
 
 logE :: String -> IO ()
 logE m = errorM "main" m
@@ -50,17 +50,20 @@ main = withSocketsDo $ do
   
   infoM "main" "Starting up..."
 
-  fn <- FN.initFn fnConfig
-
   -- start our node
   mi <- eitherDecode <$> BSL.readFile (appDir </> "identity")
   
-  case mi of
-    Left e -> logE $ "error reading node identity: " ++ e
+  node <- case mi of
+    Left e -> logE ("error reading node identity: " ++ e) >> error "can't continue"
     Right ni -> do
-      peers <- initPeers ni tcpConnect appDir
-      nodeListen (CFG.subconfig "node.listen" cfg) ni peers
-  
+      n <- mkNode ni
+      initPeers n tcpConnect appDir
+      nodeListen (CFG.subconfig "node.listen" cfg) n
+      return n
+
+  -- start Freenet
+  fn <- FN.initFn fnConfig $ sendRoutedMessage node
+
   -- start fproxy
   fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"
   when fproxyEnabled $ do
