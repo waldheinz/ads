@@ -66,7 +66,7 @@ nodeListen cfg node = do
     
   void $ forkIO $ runTCPServer s $ \ad -> do
     logI $ "incoming connection from " ++ (show $ appSockAddr ad)
-    runPeerNode node (appSource ad $= conduitDecode, conduitEncode =$ appSink ad) Nothing
+    runPeerNode node (appSource ad $= conduitDecode, conduitEncode =$ appSink ad) False
 
   infoM "net" $ "node listening on " ++ host ++ ":" ++ show port
 

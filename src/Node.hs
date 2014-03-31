@@ -22,7 +22,7 @@ import Control.Applicative ( (<$>), (<*>) )
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
-import Control.Monad ( forever, void )
+import Control.Monad ( forever, void, when )
 import Control.Monad.IO.Class ( liftIO )
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
@@ -168,7 +168,7 @@ maintainConnections node connect = forever $ do
         atomically $ modifyTVar (peersConnecting peers) (filter ((==) shouldConnect))
       Right msgio -> do
         logI "connected!"
-        runPeerNode node msgio $ Just (nodeIdentity node)
+        runPeerNode node msgio True
   
 -------------------------------------------------------------------------
 -- Peer Nodes
@@ -195,34 +195,28 @@ enqMessage n m = writeTBMQueue (nQueue n) m
 runPeerNode
   :: (Show a)
   => Node a
-  -> MessageIO a            -- ^ the (source, sink) pair to talk to the peer
-  -> Maybe (Peer a)         -- ^ our NodeInfo, if this is an outbound connection
+  -> MessageIO a -- ^ the (source, sink) pair to talk to the peer
+  -> Bool        -- ^ if this is an outbound connection
   -> IO ()
-runPeerNode node (src, sink) mni = do
+runPeerNode node (src, sink) outbound = do
   mq <- newTBMQueueIO 5
   
   -- enqueue the obligatory Hello message, if this is an
   -- outgoing connection
-  case mni of
-    Nothing -> return ()
-    Just ni -> atomically $ writeTBMQueue mq (Hello ni)
+  when outbound $ atomically $ writeTBMQueue mq (Hello $ nodeIdentity node)
 
   void $ forkIO $ src C.$$ C.awaitForever $ \msg -> do
     case msg of
       Hello p -> do
         let pn = PeerNode p mq
-            
+        
         liftIO $ do
           logI $ "got hello from " ++ show pn
-          atomically $ addPeer (nodePeers node) pn
+          atomically $ do
+            writeTBMQueue mq (Hello $ nodeIdentity node) 
+            addPeer (nodePeers node) pn
           
         return $ C.mapM_ (handlePeerMessage node pn)
       x       -> error $ show x
         
-
---  void $ forkIO $ src C.$$ (C.mapM_ $ \msg -> do
---    case msg of
---      Hello p -> connected $ PeerNode p mq
---      x       -> print ("unhandled message", x)
---                                )
   C.sourceTBMQueue mq C.$$ sink
