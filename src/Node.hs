@@ -40,6 +40,12 @@ import Message as MSG
 import qualified NextBestOnce as NBO
 import Types
 
+logI :: String -> IO ()
+logI m = infoM "node" m
+
+logW :: String -> IO ()
+logW m = warningM "node" m
+
 -------------------------------------------------------------------------
 -- Node
 -------------------------------------------------------------------------
@@ -82,7 +88,9 @@ sendRoutedMessage node target msg = do
     NBO.Forward dest msg -> do
       print ("forwarding to", dest)
       atomically $ enqMessage dest $ Routed msg
-  
+    x -> do
+      print ("unhandled routing result", x)
+      
   print result
   return ()
 
@@ -96,13 +104,6 @@ type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> I
 ----------------------------------------------------------------
 -- the peers list
 ----------------------------------------------------------------
-
-
-logI :: String -> IO ()
-logI m = infoM "peers" m
-
-logW :: String -> IO ()
-logW m = warningM "peers" m
 
 data Peers a = Peers
                { peersConnected     :: TVar [PeerNode a]      -- ^ peers we're currently connected to
@@ -210,6 +211,7 @@ runPeerNode node (src, sink) mni = do
     case msg of
       Hello p -> do
         let pn = PeerNode p mq
+        logI $ "got hello from " ++ show pn
         liftIO $ atomically $ addPeer (nodePeers node) pn
         return $ C.mapM_ (handlePeerMessage node pn)
       x       -> error $ show x
