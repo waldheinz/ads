@@ -63,7 +63,8 @@ main = withSocketsDo $ do
 
   -- start Freenet
   fn <- FN.initFn fnConfig $ sendRoutedMessage node
-
+  atomically $ nodeSetFreenet node fn
+  
   -- start fproxy
   fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"
   when fproxyEnabled $ do

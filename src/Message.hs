@@ -55,10 +55,10 @@ putHeader :: Word8 -> Put
 putHeader t = put t
 
 instance (Binary a, Show a) => Binary (Message a) where
-  put (Hello ni)      = putHeader 1 >> put ni
-  put Ping            = putHeader 2
+  put (Hello ni)                          = putHeader 1 >> put ni
+  put Ping                                = putHeader 2
   put (Routed (RoutedMessage msg mid ri)) = putHeader 3 >> put msg >> put mid >> put ri
-  put (FreenetMessage fm) = putHeader 4 >> put fm
+  put (FreenetMessage fm)                 = putHeader 4 >> put fm
   
   get = do
     t <- get :: Get Word8

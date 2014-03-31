@@ -5,6 +5,7 @@ module Node (
   -- * our node
   Node, mkNode,
   handlePeerMessage, sendRoutedMessage,
+  nodeSetFreenet,
   
   -- * Peers
   ConnectFunction,
@@ -15,14 +16,13 @@ module Node (
   
   -- * incoming / outgoig messages
   runPeerNode
-
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
-import Control.Monad ( forever, void, when )
+import Control.Monad ( forever, unless, void, when )
 import Control.Monad.IO.Class ( liftIO )
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
@@ -36,6 +36,7 @@ import System.FilePath ( (</>) )
 import System.Log.Logger
 
 import qualified Freenet.Messages as FMSG
+import qualified Freenet as FN
 import Message as MSG
 import qualified NextBestOnce as NBO
 import Types
@@ -56,6 +57,7 @@ data Node a = Node
             , nextMsgId    :: TVar Word64
             , nodeActMsgs  :: TVar (Map.Map Word64 (PeerNode a, RoutedMessage a)) -- ^ messages we're currently routing
             , nodeNbo      :: NBO.Node NodeId (RoutedMessage a) (PeerNode a)      -- ^ our NBO identity for routing
+            , nodeFreenet  :: TVar (Maybe (FN.Freenet a))                         -- ^ our freenet compatibility layer
             }
 
 mkNode :: (Show a) => Peer a -> IO (Node a)
@@ -66,6 +68,7 @@ mkNode self = do
     return (ps, mid)
 
   msgMap <- newTVarIO Map.empty
+  fn     <- newTVarIO Nothing
     
   let nbo = NBO.Node
         { NBO.location          = nodeId $ peerNodeInfo self
@@ -75,7 +78,11 @@ mkNode self = do
         , NBO.routingInfo       = rmInfo
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
-  return $ Node peers self nmid msgMap nbo
+        
+  return $ Node peers self nmid msgMap nbo fn
+
+nodeSetFreenet :: Node a -> FN.Freenet a -> STM ()
+nodeSetFreenet n fn = writeTVar (nodeFreenet n) (Just fn)
 
 sendRoutedMessage :: (Show a) => Node a -> NodeId -> Message a -> IO ()
 sendRoutedMessage node target msg = do
@@ -95,9 +102,20 @@ sendRoutedMessage node target msg = do
   return ()
 
 handlePeerMessage :: (Show a) => Node a -> PeerNode a -> Message a -> IO ()
-handlePeerMessage node pn msg = do
-  print ("incoming message", msg)
-  return ()
+handlePeerMessage node pn msg = case msg of
+  Routed rm@(RoutedMessage rmsg mid ri) -> do
+    -- record routing state
+    atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rm) m
+    case rmsg of
+      FreenetMessage fnmsg -> do
+        mfn <- atomically $ readTVar (nodeFreenet node)
+        case mfn of
+          Nothing -> logW "got Freenet message but have no Freenet subsystem"
+          Just fn -> FN.handleMessage fn fnmsg
+        
+      x -> print ("unhandled routed message", rmsg)
+      
+  x -> print ("unhandled incoming message", msg)
 
 type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
 
@@ -213,7 +231,7 @@ runPeerNode node (src, sink) outbound = do
         liftIO $ do
           logI $ "got hello from " ++ show pn
           atomically $ do
-            writeTBMQueue mq (Hello $ nodeIdentity node) 
+            unless outbound $ writeTBMQueue mq (Hello $ nodeIdentity node) 
             addPeer (nodePeers node) pn
           
         C.mapM_ (handlePeerMessage node pn)
