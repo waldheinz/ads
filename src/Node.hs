@@ -211,8 +211,11 @@ runPeerNode node (src, sink) mni = do
     case msg of
       Hello p -> do
         let pn = PeerNode p mq
-        logI $ "got hello from " ++ show pn
-        liftIO $ atomically $ addPeer (nodePeers node) pn
+            
+        liftIO $ do
+          logI $ "got hello from " ++ show pn
+          atomically $ addPeer (nodePeers node) pn
+          
         return $ C.mapM_ (handlePeerMessage node pn)
       x       -> error $ show x
         
