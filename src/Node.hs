@@ -216,7 +216,8 @@ runPeerNode node (src, sink) outbound = do
             writeTBMQueue mq (Hello $ nodeIdentity node) 
             addPeer (nodePeers node) pn
           
-        return $ C.mapM_ (handlePeerMessage node pn)
+        C.mapM_ (handlePeerMessage node pn)
+        
       x       -> error $ show x
         
   C.sourceTBMQueue mq C.$$ sink
