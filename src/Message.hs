@@ -4,7 +4,7 @@
 module Message (
   MessagePayload(..), RoutedMessage(..), 
   MessageSource, MessageSink, MessageIO,
-  Message(..)
+  Message(..), MessageId
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
@@ -37,7 +37,25 @@ data MessagePayload a
      = Hello (Peer a)
      | Ping
      | FreenetChkRequest FN.ChkRequest
+     | FreenetChkBlock   FN.ChkBlock
      deriving ( Show )
+
+instance (Binary a) => Binary (MessagePayload a) where
+  put (Hello peer)           = putHeader 1 >> put peer
+  put Ping                   = putHeader 2
+  put (FreenetChkRequest dr) = putHeader 3 >> put dr
+  put (FreenetChkBlock blk)  = putHeader 4 >> put blk
+  
+  get = do
+    t <- getWord8
+    
+    case t of
+      1 -> Hello <$> get
+      2 -> return Ping
+      3 -> FreenetChkRequest <$> get
+      4 -> FreenetChkBlock <$> get
+      _ -> fail $ "unknown message type " ++ show t
+
 
 -- |
 -- a message which should be routed to another peer
@@ -47,16 +65,17 @@ data Message a = Routed (RoutedMessage a)
                deriving (Show)
 
 instance Binary a => Binary (Message a) where
-  put (Routed msg) = putHeader 1 >> put msg
-  put (Direct msg) = putHeader 2 >> put msg
+  put (Routed msg)       = putHeader 1 >> put msg
+  put (Response mid msg) = putHeader 2 >> put mid >> put msg
+  put (Direct msg)       = putHeader 3 >> put msg
   
   get = do
     t <- getWord8
     case t of
       1 -> Routed <$> get
-      2 -> Direct <$> get
+      2 -> Response <$> get <*> get
+      3 -> Direct <$> get
       x -> fail $ "unknown message type " ++ show x
-
 
 data RoutedMessage a = RoutedMessage
                        { rmPayload :: MessagePayload a
@@ -72,16 +91,3 @@ instance Binary a => Binary (RoutedMessage a) where
 putHeader :: Word8 -> Put
 putHeader t = put t
 
-instance (Binary a) => Binary (MessagePayload a) where
-  put (Hello peer)                        = putHeader 1 >> put peer
-  put Ping                                = putHeader 2
-  put (FreenetChkRequest dr)             = putHeader 3 >> put dr
-  
-  get = do
-    t <- getWord8
-    
-    case t of
-      1 -> Hello <$> get
-      2 -> return Ping
-      3 -> FreenetChkRequest <$> get
-      _ -> fail $ "unknown message type " ++ show t

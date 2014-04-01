@@ -100,6 +100,10 @@ instance DataBlock ChkBlock where
   dataBlockLocation (ChkBlock k _ _) = k
   decryptDataBlock = decryptChk
 
+instance Binary ChkBlock where
+  put = storePut
+  get = storeGet
+
 mkChkBlock :: Key -> ChkHeader -> BS.ByteString -> Either T.Text ChkBlock
 mkChkBlock k h d
   | hash == (BSL.fromStrict $ unKey k) = Right $ ChkBlock k h d

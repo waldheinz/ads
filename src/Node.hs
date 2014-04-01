@@ -118,8 +118,20 @@ sendRoutedMessage node msg = do
     NBO.Forward dest msg -> do
       print ("forwarding to", dest)
       atomically $ enqMessage dest $ Routed msg
-    x -> do
-      print ("unhandled routing result", x)
+    x -> print ("unhandled routing result", x)
+
+sendResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
+sendResponse node mid msg = do
+  mtgt <- atomically $ do
+    m <- readTVar $ nodeActMsgs node
+    case Map.lookup mid m of
+      Nothing -> return Nothing
+      Just t  -> return $ Just t
+
+  case mtgt of
+    Nothing  -> logW $ "could not send response, message id unknown: " ++ show mid
+    Just (pn, _, _) -> do
+      atomically $ enqMessage pn $ Response mid msg
 
 handlePeerMessage :: Show a => Node a -> PeerNode a -> Message a -> IO ()
 handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = do
@@ -130,7 +142,7 @@ handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = do
       local <- FN.getChk (nodeFreenet node) req
       case local of
         Left e -> sendRoutedMessage node rm -- pass on
-        Right blk -> logW $ "don't know how to send data back"
+        Right blk -> sendResponse node mid $ FreenetChkBlock blk
       
     x -> print ("unhandled routed message", x)
       
