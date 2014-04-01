@@ -5,7 +5,6 @@ module Node (
   -- * our node
   Node, mkNode,
   handlePeerMessage, sendRoutedMessage,
-  nodeSetFreenet,
   
   -- * Peers
   ConnectFunction,
@@ -55,36 +54,34 @@ data Node a = Node
             { nodePeers    :: Peers a
             , nodeIdentity :: Peer a
             , nextMsgId    :: TVar Word64
-            , nodeActMsgs  :: TVar (Map.Map Word64 (PeerNode a, RoutedMessage a)) -- ^ messages we're currently routing
+            , nodeActMsgs  :: TVar (Map.Map Word64 (PeerNode a, MessagePayload a, NBO.RoutingInfo NodeId)) -- ^ messages we're currently routing
             , nodeNbo      :: NBO.Node NodeId (RoutedMessage a) (PeerNode a)      -- ^ our NBO identity for routing
-            , nodeFreenet  :: TVar (Maybe (FN.Freenet a))                         -- ^ our freenet compatibility layer
+            , nodeFreenet  :: FN.Freenet a                                        -- ^ our freenet compatibility layer
             }
 
-mkNode :: (Show a) => Peer a -> IO (Node a)
-mkNode self = do
+mkNode :: (Show a) => Peer a -> FN.Freenet a -> IO (Node a)
+mkNode self fn = do
   (peers, nmid) <- atomically $ do
     ps <- mkPeers
     mid <- newTVar 0
     return (ps, mid)
 
   msgMap <- newTVarIO Map.empty
-  fn     <- newTVarIO Nothing
     
-  let nbo = NBO.Node
+  let
+    fst' (a, _, _) = a
+    nbo = NBO.Node
         { NBO.location          = nodeId $ peerNodeInfo self
         , NBO.neighbours        = readTVar $ peersConnected peers
         , NBO.neighbourLocation = \np -> nodeId $ peerNodeInfo $ nodePeer np
-        , NBO.popPred           = \msg -> readTVar msgMap >>= (\m -> return $ maybe Nothing (Just . fst) (Map.lookup (rmId msg) m))
+        , NBO.popPred           = \msg -> readTVar msgMap >>= (\m -> return $ maybe Nothing (Just . fst') (Map.lookup (rmId msg) m))
         , NBO.routingInfo       = rmInfo
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
         
   return $ Node peers self nmid msgMap nbo fn
 
-nodeSetFreenet :: Node a -> FN.Freenet a -> STM ()
-nodeSetFreenet n fn = writeTVar (nodeFreenet n) (Just fn)
-
-sendRoutedMessage :: (Show a) => Node a -> NodeId -> Message a -> IO ()
+sendRoutedMessage :: Show a => Node a -> NodeId -> MessagePayload a -> IO ()
 sendRoutedMessage node target msg = do
   result <- atomically $ do
     mid <- readTVar (nextMsgId node)
@@ -101,22 +98,17 @@ sendRoutedMessage node target msg = do
   print result
   return ()
 
-handlePeerMessage :: (Show a) => Node a -> PeerNode a -> Message a -> IO ()
-handlePeerMessage node pn msg = case msg of
-  Routed rm@(RoutedMessage rmsg mid ri) -> do
-    -- record routing state
-    atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rm) m
-    case rmsg of
-      FreenetMessage fnmsg -> do
-        mfn <- atomically $ readTVar (nodeFreenet node)
-        case mfn of
-          Nothing -> logW "got Freenet message but have no Freenet subsystem"
-          Just fn -> FN.handleMessage fn fnmsg
-        
-      x -> print ("unhandled routed message", rmsg)
+handlePeerMessage :: Show a => Node a -> PeerNode a -> Message a -> IO ()
+handlePeerMessage node pn (Routed (RoutedMessage rmsg mid ri)) = do
+  -- record routing state
+  atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rmsg, ri) m
+  case rmsg of
+    FreenetDataRequest dr -> do
+      let fn = nodeFreenet node
+      logW $ "don't know how to do this."
       
-  x -> print ("unhandled incoming message", msg)
-
+    x -> print ("unhandled routed message", x)
+      
 type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
 
 ----------------------------------------------------------------
@@ -221,17 +213,17 @@ runPeerNode node (src, sink) outbound = do
   
   -- enqueue the obligatory Hello message, if this is an
   -- outgoing connection
-  when outbound $ atomically $ writeTBMQueue mq (Hello $ nodeIdentity node)
+  when outbound $ atomically $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
 
   void $ forkIO $ src C.$$ C.awaitForever $ \msg -> do
     case msg of
-      Hello p -> do
+      Direct (Hello p) -> do
         let pn = PeerNode p mq
         
         liftIO $ do
           logI $ "got hello from " ++ show pn
           atomically $ do
-            unless outbound $ writeTBMQueue mq (Hello $ nodeIdentity node) 
+            unless outbound $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node) 
             addPeer (nodePeers node) pn
           
         C.mapM_ (handlePeerMessage node pn)

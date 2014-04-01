@@ -50,20 +50,20 @@ main = withSocketsDo $ do
   
   infoM "main" "Starting up..."
 
+  -- start Freenet
+  fn <- FN.initFn fnConfig
+
   -- start our node
   mi <- eitherDecode <$> BSL.readFile (appDir </> "identity")
   
   node <- case mi of
     Left e -> logE ("error reading node identity: " ++ e) >> error "can't continue"
     Right ni -> do
-      n <- mkNode ni
+      n <- mkNode ni fn
       initPeers n tcpConnect appDir
       nodeListen (CFG.subconfig "node.listen" cfg) n
       return n
 
-  -- start Freenet
-  fn <- FN.initFn fnConfig $ sendRoutedMessage node
-  atomically $ nodeSetFreenet node fn
   
   -- start fproxy
   fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"

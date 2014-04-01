@@ -2,10 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet (
-  Freenet, initFn, requestData,
-
-  -- * Talking to other nodes
-  handleMessage
+  Freenet, initFn, requestData, requestChk
   ) where
 
 import Control.Concurrent ( forkIO )
@@ -18,14 +15,9 @@ import qualified Data.Text as T
 import System.FilePath ( (</>) )
 import System.Log.Logger
 
-import qualified Message as MSG
-import qualified NextBestOnce as NBO
-import Types
-
 import Freenet.Chk
 import qualified Freenet.Companion as FC
 import Freenet.Keys
-import Freenet.Messages
 import Freenet.Ssk
 import qualified Freenet.Store as FS
 import Freenet.Types
@@ -36,15 +28,15 @@ data Freenet a = FN
                , fnCompanion   :: Maybe FC.Companion
                , fnIncomingChk :: TChan ChkFound
                , fnIncomingSsk :: TChan SskFound
-               , fnMsgSend     :: NodeId -> MSG.Message a -> IO ()
+--               , fnMsgSend     :: NodeId -> MSG.Message a -> IO ()
                }
 
 logI :: String -> IO ()
 logI m = infoM "freenet" m
 
 -- | initializes Freenet subsystem
-initFn :: CFG.Config -> (NodeId -> MSG.Message a -> IO ()) -> IO (Freenet a)
-initFn cfg send = do
+initFn :: CFG.Config -> IO (Freenet a)
+initFn cfg = do
   -- datastore
   dsdir       <- CFG.require cfg "datastore.directory"
   chkCount    <- CFG.require cfg "datastore.chk-count"
@@ -53,7 +45,7 @@ initFn cfg send = do
   chkIncoming <- newBroadcastTChanIO
   sskIncoming <- newBroadcastTChanIO
   
-  let fn = FN chkStore Nothing chkIncoming sskIncoming send
+  let fn = FN chkStore Nothing chkIncoming sskIncoming
 
   -- companion
   let ccfg = CFG.subconfig "companion" cfg
@@ -63,9 +55,6 @@ initFn cfg send = do
     Just _  -> do
       comp <- FC.initCompanion ccfg (offerChk fn True) (offerSsk fn True)
       return $ fn { fnCompanion = Just comp }
-
-handleMessage :: Freenet a -> FreenetMessage -> IO ()
-handleMessage fn msg = print ("freenet handleMessage", msg)
 
 offerSsk :: Freenet a -> Bool -> SskFound -> STM ()
 offerSsk fn _ df = do
@@ -92,8 +81,8 @@ handleDataRequest fn dr = do
   case fromStore of
     Just df -> atomically $ offerChk fn False df
     Nothing -> do
-      let nId = mkNodeId' $ unKey $ dataRequestLocation dr
-      fnMsgSend fn nId (MSG.FreenetMessage $ DataRequestMsg dr)
+--      let nId = mkNodeId' $ unKey $ dataRequestLocation dr
+--      fnMsgSend fn nId (MSG.FreenetDataRequest dr)
       
       case fnCompanion fn of
         Nothing -> return ()
@@ -139,3 +128,20 @@ requestData fn uri = logI ("data request for " ++ show uri) >> let dr = toDataRe
     return $ case md of
       Nothing -> Left "requestData: timeout"
       Just d  -> decryptDataFound d (uriCryptoKey uri) (uriCryptoAlg uri)
+
+requestChk :: Freenet a -> DataRequest -> IO (Either T.Text ChkFound)
+requestChk fn dr = case dr of
+  ChkRequest {} -> do
+    let 
+      l = dataRequestLocation dr
+      chan = fnIncomingChk fn
+      
+    bucket <- waitKeyTimeout (chan) l
+    handleDataRequest fn dr
+    md <- atomically $ readTMVar bucket
+  
+    return $ case md of
+      Nothing -> Left "requestChk: timeout"
+      Just d  -> Right d
+      
+  _ -> error "requestChk: only CHK requests, please."

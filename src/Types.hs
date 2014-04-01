@@ -76,7 +76,7 @@ instance FromJSON NodeInfo where
 ----------------------------------------------------------------
 
 
-data (Show a) => Peer a = Peer
+data Peer a = Peer
             { peerNodeInfo :: NodeInfo        -- ^ the static node info of this peer
             , peerAddress  :: a               -- ^ where this peer might be connected
             } deriving ( Show )
@@ -90,7 +90,7 @@ instance (Show a, FromJSON a) => FromJSON (Peer a) where
                          v .: "address"
   parseJSON _ = mzero
 
-instance (Binary a, Show a) => Binary (Peer a) where
+instance (Binary a) => Binary (Peer a) where
   put (Peer ni addr) = put ni >> put addr
   get = Peer <$> get <*> get
 

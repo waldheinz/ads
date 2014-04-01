@@ -2,16 +2,17 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module Message (
-  Message(..),
+  MessagePayload(..), RoutedMessage(..), 
   MessageSource, MessageSink, MessageIO,
-  RoutedMessage(..)
+  Message(..)
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
 import Data.Binary
 import Data.Conduit
 
-import qualified Freenet.Messages as FNM
+import qualified Freenet.Keys as FN
+--import qualified Freenet.Messages as FNM
 import qualified NextBestOnce as NBO
 import Types
 
@@ -33,41 +34,54 @@ type MessageId = Word64
 -- |
 -- Messages are parametrised over the type of Peer addresses used, which could
 -- be either hostnames or message queues for simulations.
-data (Show a) => Message a
+data MessagePayload a
      = Hello (Peer a)
      | Ping
-     | Routed (RoutedMessage a)
-     | FreenetMessage FNM.FreenetMessage
+     | FreenetDataRequest FN.DataRequest  --  FNM.FreenetMessage
      deriving ( Show )
 
 -- |
 -- a message which should be routed to another peer
+data Message a = Routed (RoutedMessage a)
+               | Direct (MessagePayload a)
+               deriving (Show)
+
+instance Binary a => Binary (Message a) where
+  put (Routed msg) = putHeader 1 >> put msg
+  put (Direct msg) = putHeader 2 >> put msg
+  
+  get = do
+    t <- getWord8
+    case t of
+      1 -> Routed <$> get
+      2 -> Direct <$> get
+      x -> fail $ "unknown message type " ++ show x
+
+
 data RoutedMessage a = RoutedMessage
-                       { rmPayload :: Message a
+                       { rmPayload :: MessagePayload a
                        , rmId      :: MessageId
                        , rmInfo    :: NBO.RoutingInfo NodeId
                        }
+                       deriving ( Show )
 
-instance (Show a) => Show (RoutedMessage a) where
-  show (RoutedMessage p _ i) = show p ++ " (routed to " ++ show i ++ ")"
-
+instance Binary a => Binary (RoutedMessage a) where
+  put (RoutedMessage p mid ri) = put p >> put mid >> put ri
+  get = RoutedMessage <$> get <*> get <*> get
+  
 putHeader :: Word8 -> Put
 putHeader t = put t
 
-instance (Binary a, Show a) => Binary (Message a) where
-  put (Hello ni)                          = putHeader 1 >> put ni
+instance (Binary a) => Binary (MessagePayload a) where
+  put (Hello peer)                        = putHeader 1 >> put peer
   put Ping                                = putHeader 2
-  put (Routed (RoutedMessage msg mid ri)) = putHeader 3 >> put msg >> put mid >> put ri
-  put (FreenetMessage fm)                 = putHeader 4 >> put fm
+  put (FreenetDataRequest dr)             = putHeader 3 >> put dr
   
   get = do
-    t <- get :: Get Word8
+    t <- getWord8
     
     case t of
       1 -> Hello <$> get
       2 -> return Ping
-      3 -> do
-           rm <- RoutedMessage <$> get <*> get <*> get
-           return $ Routed rm
-      4 -> FreenetMessage <$> get
+      3 -> FreenetDataRequest <$> get
       _ -> fail $ "unknown message type " ++ show t
