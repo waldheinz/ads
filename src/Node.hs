@@ -142,7 +142,7 @@ handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = do
       local <- FN.getChk (nodeFreenet node) req
       case local of
         Left e -> sendRoutedMessage node rm -- pass on
-        Right blk -> sendResponse node mid $ FreenetChkBlock blk
+        Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
       
     x -> print ("unhandled routed message", x)
       
