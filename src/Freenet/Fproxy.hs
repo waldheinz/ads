@@ -11,7 +11,8 @@ import Data.Text.Encoding ( encodeUtf8 )
 import Network.HTTP.Types.Status
 import qualified Network.Wai as WAI
 
-import Freenet
+--import Freenet
+import Node
 import Freenet.Fetch
 import Freenet.URI
 
@@ -19,7 +20,7 @@ import Freenet.URI
 er :: T.Text -> WAI.Response
 er msg = WAI.responseLBS status500 [] (BSL.fromStrict $ encodeUtf8 msg)
 
-fproxy :: Freenet a -> WAI.Application
+fproxy :: Node a -> WAI.Application
 fproxy fn req = do
   let
     path = T.intercalate "/" $ WAI.pathInfo req

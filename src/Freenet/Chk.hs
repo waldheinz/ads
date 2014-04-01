@@ -3,7 +3,7 @@
 
 module Freenet.Chk (
   -- * Working with CHKs
-  ChkFound(..), mkChkFound,
+  ChkRequest(..), ChkBlock(..), mkChkBlock,
 
   -- * CHK Headers
   ChkHeader, mkChkHeader, unChkHeader, chkHeaderHashId,
@@ -76,33 +76,33 @@ chkHeaderCipherLen = BS.drop 34 . unChkHeader
 chkHeaderHashId :: ChkHeader -> Word16
 chkHeaderHashId = runGet get . BSL.fromStrict . unChkHeader
 
-data ChkFound = ChkFound !Key !ChkHeader !BS.ByteString -- location, headers and data
+data ChkBlock = ChkBlock !Key !ChkHeader !BS.ByteString -- location, headers and data
 
-instance Show ChkFound where
-  show (ChkFound k h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
+instance Show ChkBlock where
+  show (ChkBlock k h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
 
 -- |
 -- Size of the CHK payload, which is 32kiB.
 chkDataSize :: Int
 chkDataSize = 32768
 
-instance StorePersistable ChkFound where
+instance StorePersistable ChkBlock where
   storeSize = \_ -> 32 + chkHeaderSize + chkDataSize
-  storePut  = \(ChkFound k h d) -> put k >> put h >> putByteString d
-  storeGet  = \_ -> do
+  storePut  = \(ChkBlock k h d) -> put k >> put h >> putByteString d
+  storeGet  = do
     (k, h, d) <- (,,) <$> get <*> get <*> getByteString 32768
-    case mkChkFound k h d of
+    case mkChkBlock k h d of
       Right df -> return df
       Left e   -> fail $ T.unpack e
   
 -- | find the routing key for a DataFound
-instance DataFound ChkFound where
-  dataFoundLocation (ChkFound k _ _) = k
-  decryptDataFound = decryptChk
+instance DataBlock ChkBlock where
+  dataBlockLocation (ChkBlock k _ _) = k
+  decryptDataBlock = decryptChk
 
-mkChkFound :: Key -> ChkHeader -> BS.ByteString -> Either T.Text ChkFound
-mkChkFound k h d
-  | hash == (BSL.fromStrict $ unKey k) = Right $ ChkFound k h d
+mkChkBlock :: Key -> ChkHeader -> BS.ByteString -> Either T.Text ChkBlock
+mkChkBlock k h d
+  | hash == (BSL.fromStrict $ unKey k) = Right $ ChkBlock k h d
   | otherwise = Left "hash mismatch"
   where
     hash = bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
@@ -111,11 +111,11 @@ mkChkFound k h d
 -- given the secret crypto key (second part of URIs), data found can be
 -- decrypted to get the source data back
 decryptChk
-  :: ChkFound                     -- ^ the encrypted data together with their headers
+  :: ChkBlock                     -- ^ the encrypted data together with their headers
   -> Key                          -- ^ the secret crypto key (second part of URIs)
   -> Word8                        -- ^ crypto algorithm used
   -> Either T.Text BSL.ByteString -- ^ the decrypted payload
-decryptChk (ChkFound _ header ciphertext) key calg
+decryptChk (ChkBlock _ header ciphertext) key calg
   | calg == 3 = decryptChkAesCtr header ciphertext key
   | calg == 2 = decryptChkAesPcfb header ciphertext key
   | otherwise = Left $ T.pack $ "unknown CHK crypto algorithm " ++ show calg
@@ -151,3 +151,19 @@ decryptChkAesCtr header ciphertext key
     len = fromIntegral $ runGet getWord16be $ BSL.fromStrict lenbytes
     plaintext = BS.take len plaintext'
     mac = bytestringDigest (hmacSha256 (BSL.fromStrict $ unKey key) (BSL.fromStrict plaintext''))
+
+-------------------------------------------------------------------------------------------------
+-- Requesting CHKs
+-------------------------------------------------------------------------------------------------
+
+data ChkRequest = ChkRequest
+                  { chkReqLocation :: ! Key   -- ^ the location of the data
+                  , chkReqHashAlg  :: ! Word8 -- ^ the hash algorithm to use
+                  } deriving ( Show )
+                  
+instance Binary ChkRequest where
+  put (ChkRequest l h) = put l >> put h
+  get = ChkRequest <$> get <*> get
+
+instance DataRequest ChkRequest where
+  dataRequestLocation = chkReqLocation

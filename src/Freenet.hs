@@ -2,13 +2,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet (
-  Freenet, initFn, requestData, requestChk
+  Freenet, initFn, getChk,
   ) where
 
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
 import Control.Monad ( void, when )
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import qualified Data.Text as T
@@ -17,18 +16,15 @@ import System.Log.Logger
 
 import Freenet.Chk
 import qualified Freenet.Companion as FC
-import Freenet.Keys
 import Freenet.Ssk
 import qualified Freenet.Store as FS
 import Freenet.Types
-import Freenet.URI
 
 data Freenet a = FN
-               { fnChkStore    :: FS.StoreFile ChkFound
+               { fnChkStore    :: FS.StoreFile ChkBlock
                , fnCompanion   :: Maybe FC.Companion
-               , fnIncomingChk :: TChan ChkFound
+               , fnIncomingChk :: TChan ChkBlock
                , fnIncomingSsk :: TChan SskFound
---               , fnMsgSend     :: NodeId -> MSG.Message a -> IO ()
                }
 
 logI :: String -> IO ()
@@ -40,7 +36,7 @@ initFn cfg = do
   -- datastore
   dsdir       <- CFG.require cfg "datastore.directory"
   chkCount    <- CFG.require cfg "datastore.chk-count"
-  chkStore    <- FS.mkStoreFile (undefined :: ChkFound) (dsdir </> "store-chk") chkCount
+  chkStore    <- FS.mkStoreFile (undefined :: ChkBlock) (dsdir </> "store-chk") chkCount
   
   chkIncoming <- newBroadcastTChanIO
   sskIncoming <- newBroadcastTChanIO
@@ -64,7 +60,7 @@ offerSsk fn _ df = do
   -- broadcast arrival
   writeTChan (fnIncomingSsk fn) df
 
-offerChk :: Freenet a -> Bool -> ChkFound -> STM ()
+offerChk :: Freenet a -> Bool -> ChkBlock -> STM ()
 offerChk fn toStore df = do
   -- write to our store
   when toStore $ FS.putData (fnChkStore fn) df
@@ -72,35 +68,30 @@ offerChk fn toStore df = do
   -- broadcast arrival
   writeTChan (fnIncomingChk fn) df
 
-handleDataRequest :: Freenet a -> DataRequest -> IO ()
-handleDataRequest fn dr = do
-  fromStore <- case dr of
-    (ChkRequest { }) -> FS.getData (fnChkStore fn) dr
-    _ -> return Nothing
+handleChkRequest :: Freenet a -> ChkRequest -> IO ()
+handleChkRequest fn dr = do
+  fromStore <- FS.getData (fnChkStore fn) (dataRequestLocation dr)
   
   case fromStore of
     Just df -> atomically $ offerChk fn False df
-    Nothing -> do
---      let nId = mkNodeId' $ unKey $ dataRequestLocation dr
---      fnMsgSend fn nId (MSG.FreenetDataRequest dr)
-      
-      case fnCompanion fn of
+    Nothing -> case fnCompanion fn of
         Nothing -> return ()
-        Just c  -> FC.get c dr
+        Just c  -> FC.getChk c dr
 
-waitKeyTimeout :: DataFound f => TChan f -> Key -> IO (TMVar (Maybe f))
+waitKeyTimeout :: DataBlock f => TChan f -> Key -> IO (TMVar (Maybe f))
 waitKeyTimeout chan loc = do
   bucket  <- newEmptyTMVarIO
-  timeout <- registerDelay $ 30 * 1000 * 1000
+  timeout <- registerDelay $ 10 * 1000 * 1000
   chan'    <- atomically $ dupTChan chan
   
   -- wait for data or timeout
   void $ forkIO $ atomically $ orElse
-    (readTChan chan' >>= \cf -> if dataFoundLocation cf == loc then putTMVar bucket (Just cf) else retry)
+    (readTChan chan' >>= \cf -> if dataBlockLocation cf == loc then putTMVar bucket (Just cf) else retry)
     (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
 
   return bucket
-
+  
+{-
 requestData :: Freenet a -> URI -> IO (Either T.Text BSL.ByteString)
 requestData fn uri = logI ("data request for " ++ show uri) >> let dr = toDataRequest uri in case dr of
   ChkRequest {} -> do
@@ -128,20 +119,22 @@ requestData fn uri = logI ("data request for " ++ show uri) >> let dr = toDataRe
     return $ case md of
       Nothing -> Left "requestData: timeout"
       Just d  -> decryptDataFound d (uriCryptoKey uri) (uriCryptoAlg uri)
+-}
 
-requestChk :: Freenet a -> DataRequest -> IO (Either T.Text ChkFound)
-requestChk fn dr = case dr of
-  ChkRequest {} -> do
-    let 
-      l = dataRequestLocation dr
-      chan = fnIncomingChk fn
+-- |
+-- Tries to fetch CHK data either from the store or our
+-- companion. Might block quite some time if the companion
+-- is involved.
+getChk :: Freenet a -> ChkRequest -> IO (Either T.Text ChkBlock)
+getChk fn dr = do
+  let 
+    l = dataRequestLocation dr
+    chan = fnIncomingChk fn
       
-    bucket <- waitKeyTimeout (chan) l
-    handleDataRequest fn dr
-    md <- atomically $ readTMVar bucket
+  bucket <- waitKeyTimeout (chan) l
+  handleChkRequest fn dr
+  md <- atomically $ readTMVar bucket
   
-    return $ case md of
-      Nothing -> Left "requestChk: timeout"
-      Just d  -> Right d
-      
-  _ -> error "requestChk: only CHK requests, please."
+  return $ case md of
+    Nothing -> Left "requestChk: timeout"
+    Just d  -> Right d

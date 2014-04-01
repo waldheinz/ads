@@ -3,7 +3,7 @@
 
 module Freenet.Types (
   Key(..), mkKey, mkKey',
-  DataRequest(..), DataFound(..), StorePersistable(..)
+  DataRequest(..), DataBlock(..), StorePersistable(..)
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
@@ -42,39 +42,21 @@ mkKey' bs
   | BS.length bs == keySize = Key bs
   | otherwise               = error "expected 32 bytes in mkKey"
 
-class DataFound f where
-  dataFoundLocation :: f -> Key
-  decryptDataFound
+-- |
+-- A still encrypted, but verified, chunk of data.
+class DataBlock f where
+  dataBlockLocation :: f -> Key
+  decryptDataBlock
     :: f      
     -> Key                          -- ^ the secret key
     -> Word8                        -- ^ the crypto algorithm used (why this is not stored with the data is not known)
     -> Either T.Text BSL.ByteString -- ^ either a beefy error message or the decrypted payload, already trimmed to correct length
-
-data DataRequest
-     = ChkRequest
-       { chkReqLocation :: ! Key   -- ^ the location of the data
-       , chkReqHashAlg  :: ! Word8 -- ^ the hash algorithm to use
-       }
-     | SskRequest
-       { sskReqPkh      :: ! Key
-       , sskReqEhd      :: ! Key
-       , sskReqAlg      :: ! Word8
-       }  
-       deriving ( Show )
-
-instance Binary DataRequest where
-  put (ChkRequest l h) = putWord8 1 >> put l >> put h
-  put (SskRequest pk eh a) = putWord8 2 >> put pk >> put eh >> put a
-
-  get = do
-    tp <- getWord8
-
-    case tp of
-      1 -> ChkRequest <$> get <*> get
-      2 -> SskRequest <$> get <*> get <*> get
-      x -> fail $ "unknown data request type " ++ show x
       
-class DataFound a => StorePersistable a where
+class DataBlock a => StorePersistable a where
   storeSize :: a -> Int
   storePut  :: a -> Put
-  storeGet  :: DataRequest -> Get a
+  storeGet  :: Get a
+
+class DataRequest a where
+  dataRequestLocation :: a -> Key
+  

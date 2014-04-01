@@ -2,7 +2,8 @@
 {-# LANGUAGE MultiParamTypeClasses, OverloadedStrings #-}
 
 module Freenet.Ssk (
-  SskFound(..), mkSskFound, sskLocation, sskLocation', sskEncryptDocname,
+  SskRequest(..), SskFound(..), mkSskFound,
+  sskLocation, sskLocation', sskEncryptDocname,
   
   -- * SSK Headers
   SskHeader, mkSskHeader, sskDataSize, sskHeaderSize,
@@ -96,15 +97,15 @@ instance Show SskFound where
 instance StorePersistable SskFound where
   storeSize = \_ -> 32 + pubKeySize + sskHeaderSize + sskDataSize
   storePut = \(SskFound k pk h d) -> put k >> put pk >> put h >> putByteString d
-  storeGet = \_ -> do
+  storeGet = do
        (k, pk, h, d) <- (,,,) <$> get <*> get <*> get <*> getByteString sskDataSize
        case mkSskFound k h d pk of
          Right df -> return df
          Left e   -> fail $ T.unpack e
   
-instance DataFound SskFound where
-  dataFoundLocation (SskFound k _ _ _) = k
-  decryptDataFound = decryptSskFound
+instance DataBlock SskFound where
+  dataBlockLocation (SskFound k _ _ _) = k
+  decryptDataBlock = decryptSskFound
 
 mkSskFound
   :: Key                      -- ^ location
@@ -247,3 +248,14 @@ padBs pl b
 
 bs2posI :: BS.ByteString -> Integer
 bs2posI = BS.foldl' (\a b -> (256 * a) .|. (fromIntegral b)) 0
+
+data SskRequest = SskRequest
+                  { sskReqPkh      :: ! Key
+                  , sskReqEhd      :: ! Key
+                  , sskReqAlg      :: ! Word8
+                  }
+                  
+instance Binary SskRequest where
+  put (SskRequest pk eh a) = put pk >> put eh >> put a
+  get = SskRequest <$> get <*> get <*> get
+  

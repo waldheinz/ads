@@ -16,23 +16,33 @@ import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 import System.Log.Logger
 
-import Freenet
+import Node
+import Freenet.Chk
 import Freenet.Compression
 import Freenet.Metadata
+import Freenet.Types
 import Freenet.URI
 
 logI :: String -> IO ()
 logI m = infoM "freenet.fetch" m
 
+requestNodeData :: Node a -> URI -> IO (Either T.Text BSL.ByteString)
+requestNodeData n (CHK loc key e _) = do
+  result <- requestChk n $ ChkRequest loc (chkExtraCrypto e)
+
+  return $ case result of
+    Left e    -> Left e
+    Right blk -> decryptDataBlock blk key $ chkExtraCrypto e
+
 -- |
 -- Tries to fetch the specified URI, parses metadata if it's
 -- a control document, goes on fetching the referenced data,
 -- and finally returns everything
-fetchUri :: Freenet a -> URI -> IO (Either T.Text BSL.ByteString)
+fetchUri :: Node a -> URI -> IO (Either T.Text BSL.ByteString)
 fetchUri fn uri = do
   logI $ "fetching " ++ show uri
   
-  db <- requestData fn uri
+  db <- requestNodeData fn uri
   
   case db of
     Left e  -> return $ Left e
@@ -43,12 +53,12 @@ fetchUri fn uri = do
                            Right md -> resolvePath fn (uriPath uri) Nothing (Just md)
                        else return $ Right plaintext
 
-fetchUris :: Freenet a -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
+fetchUris :: Node a -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
 fetchUris fn uris = do
-  result <- sequence $ map (requestData fn) uris
+  result <- sequence $ map (requestNodeData fn) uris
   return $ zip uris result
 
-fetchRedirect :: Freenet a -> RedirectTarget -> [T.Text] -> IO (Either T.Text BSL.ByteString)
+fetchRedirect :: Node a -> RedirectTarget -> [T.Text] -> IO (Either T.Text BSL.ByteString)
 fetchRedirect fn (RedirectKey _ uri) path = fetchUri fn $ appendUriPath uri path
 --                                            if isControlDocument uri
 --                                            then fetchUri fn $ appendUriPath uri path
@@ -70,7 +80,7 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) _ = do -- TODO: we're not ret
 
 type Archive = Map.Map String BSL.ByteString
 
-fetchArchive :: Freenet a -> RedirectTarget -> ArchiveManifestType -> IO (Either T.Text Archive)
+fetchArchive :: Node a -> RedirectTarget -> ArchiveManifestType -> IO (Either T.Text Archive)
 fetchArchive fn tgt tp = do
   logI $ "fetching archive"
   arch <- fetchRedirect fn tgt []
@@ -88,7 +98,7 @@ fetchArchive fn tgt tp = do
       
 -- | FIXME: watch out for infinite redirects
 resolvePath
-  :: Freenet a
+  :: Node a
   -> [T.Text]                          -- ^ path elements to be resolved
   -> Maybe Archive                     -- ^ archive to resolve simple redirects etc against
   -> Maybe Metadata                    -- ^ the metadata where we try to locate the entries in

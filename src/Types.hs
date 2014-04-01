@@ -3,7 +3,7 @@
 
 module Types (
   NodeId, mkNodeId', NodeInfo(..),
-
+  
   Peer(..), mkPeer
   ) where
 
@@ -74,7 +74,6 @@ instance FromJSON NodeInfo where
 ----------------------------------------------------------------
 -- Peers / Peer Nodes
 ----------------------------------------------------------------
-
 
 data Peer a = Peer
             { peerNodeInfo :: NodeInfo        -- ^ the static node info of this peer

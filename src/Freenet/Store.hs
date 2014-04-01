@@ -18,7 +18,6 @@ import qualified Data.ByteString.Lazy as BSL
 import Data.Hashable
 import System.IO
 
-import Freenet.Keys
 import Freenet.Types
 
 ----------------------------------------------------------------
@@ -26,7 +25,7 @@ import Freenet.Types
 ----------------------------------------------------------------
 
 data StoreRequest f
-     = ReadRequest  DataRequest (TMVar (Maybe f)) -- ^ the request and where to put the data when found
+     = ReadRequest Key (TMVar (Maybe f)) -- ^ the request and where to put the data when found
      | WriteRequest f                   -- ^ the data to put in the store
 
 data StoreFile f = StoreFile
@@ -41,10 +40,10 @@ mkStoreFile sp fileName count = do
   
   let
     entrySize = 1 + storeSize sp
-    doGet dr = do
+    doGet = do
       flags <- getWord8
       if flags == 1
-        then storeGet dr
+        then storeGet
         else fail "empty slot"
     doPut df    = putWord8 1 >> storePut df
     isFree = getWord8 >>= (\flags -> return $ flags == 0)
@@ -59,8 +58,7 @@ mkStoreFile sp fileName count = do
       let idx = (fromIntegral $ hash loc :: Word32) `rem` (fromIntegral count)
       in map (\i -> (fromIntegral i) * (fromIntegral entrySize)) [idx .. idx + 5]
 
-    doRead dr bucket = go offsets where
-      loc       = dataRequestLocation dr
+    doRead loc bucket = go offsets where
       offsets   = getOffsets loc
       go []     = atomically $ putTMVar bucket Nothing -- no offsets left, terminate
       go (o:os) = do
@@ -69,14 +67,14 @@ mkStoreFile sp fileName count = do
         hSeek handle AbsoluteSeek o
         d <- BSL.hGet handle entrySize
         
-        case runGetOrFail (doGet dr) d of
+        case runGetOrFail doGet d of
           Left  (_, _, _)  -> (print $ "nothing to read at " ++ show o) >> go os
-          Right (_, _, df) -> if loc == dataFoundLocation df
+          Right (_, _, df) -> if loc == dataBlockLocation df
                               then atomically $ putTMVar bucket $ Just df
                               else print ("something else at " ++ show o) >>  go os
           
     doWrite df = go offsets where
-      loc       = dataFoundLocation df
+      loc       = dataBlockLocation df
       offsets   = getOffsets loc
       go []     = print "no free slots"
       go (o:os) = do
@@ -102,11 +100,11 @@ mkStoreFile sp fileName count = do
 
   return $ StoreFile tid rq handle
   
-putData :: DataFound f => StoreFile f -> f -> STM ()
+putData :: DataBlock f => StoreFile f -> f -> STM ()
 putData sf df = writeTBQueue (sfReqs sf) (WriteRequest df)
 
-getData :: DataFound f => StoreFile f -> DataRequest -> IO (Maybe f)
-getData fs dr = do
+getData :: DataBlock f => StoreFile f -> Key -> IO (Maybe f)
+getData fs key = do
   bucket <- newEmptyTMVarIO
-  atomically $ writeTBQueue (sfReqs fs) (ReadRequest dr bucket)
+  atomically $ writeTBQueue (sfReqs fs) (ReadRequest key bucket)
   atomically $ takeTMVar bucket

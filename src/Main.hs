@@ -63,13 +63,12 @@ main = withSocketsDo $ do
       initPeers n tcpConnect appDir
       nodeListen (CFG.subconfig "node.listen" cfg) n
       return n
-
   
   -- start fproxy
   fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"
   when fproxyEnabled $ do
     fpPort <- CFG.require fnConfig "fproxy.port"
-    void $ forkIO $ Warp.run fpPort $ FP.fproxy fn
+    void $ forkIO $ Warp.run fpPort $ FP.fproxy node
 
   -- wait for shutdown
   atomically $ readTVar shutdown >>= check

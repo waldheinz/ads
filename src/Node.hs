@@ -4,7 +4,8 @@
 module Node (
   -- * our node
   Node, mkNode,
-  handlePeerMessage, sendRoutedMessage,
+--  handlePeerMessage, sendRoutedMessage,
+  requestChk,
   
   -- * Peers
   ConnectFunction,
@@ -30,12 +31,13 @@ import qualified Data.Conduit.TQueue as C
 import Data.Aeson
 import Data.List ( (\\) )
 import qualified Data.Map.Strict as Map
+import qualified Data.Text as T
 import Data.Word
 import System.FilePath ( (</>) )
 import System.Log.Logger
 
-import qualified Freenet.Messages as FMSG
 import qualified Freenet as FN
+import qualified Freenet.Chk as FN
 import Message as MSG
 import qualified NextBestOnce as NBO
 import Types
@@ -81,6 +83,19 @@ mkNode self fn = do
         
   return $ Node peers self nmid msgMap nbo fn
 
+-- |
+-- Handle a data request at node level. This means we first ask our Freenet layer
+-- if it has the data in it's stores, and if this fails we route a message to our
+-- peer nodes.
+requestChk :: Node a -> FN.ChkRequest -> IO (Either T.Text FN.ChkBlock)
+requestChk n req = do
+  local <- FN.getChk (nodeFreenet n) req
+  case local of
+    Right blk -> return $ Right blk
+    Left e    -> do
+      logI $ "could not fetch data locally " ++ show e
+      return $ Left e
+  
 sendRoutedMessage :: Show a => Node a -> NodeId -> MessagePayload a -> IO ()
 sendRoutedMessage node target msg = do
   result <- atomically $ do
@@ -101,10 +116,11 @@ sendRoutedMessage node target msg = do
 handlePeerMessage :: Show a => Node a -> PeerNode a -> Message a -> IO ()
 handlePeerMessage node pn (Routed (RoutedMessage rmsg mid ri)) = do
   -- record routing state
-  atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rmsg, ri) m
+--  atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rmsg, ri) m
   case rmsg of
-    FreenetDataRequest dr -> do
+    FreenetChkRequest dr -> do
       let fn = nodeFreenet node
+      
       logW $ "don't know how to do this."
       
     x -> print ("unhandled routed message", x)

@@ -4,7 +4,7 @@
 module Freenet.Companion (
   Companion, initCompanion,
 
-  get
+  getChk, getSsk
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -28,7 +28,7 @@ data Companion = Companion
                  { cHandle :: Handle
                  }
 
-initCompanion :: CFG.Config -> (ChkFound -> STM ()) -> (SskFound -> STM ()) -> IO Companion
+initCompanion :: CFG.Config -> (ChkBlock -> STM ()) -> (SskFound -> STM ()) -> IO Companion
 initCompanion cfg chkHandler sskHandler = do
   host <- CFG.require cfg "host"
   port <- CFG.require cfg "port" :: IO Int
@@ -53,7 +53,7 @@ initCompanion cfg chkHandler sskHandler = do
             key <- fromBase64' ktxt >>= mkKey
             hdr <- fromBase64' hstr >>= mkChkHeader
             d <- fromBase64' dstr
-            mkChkFound key hdr d
+            mkChkBlock key hdr d
 
         case df of
           Left e  -> putStrLn $ "could not parse CHK found response: " ++ T.unpack e
@@ -79,11 +79,12 @@ initCompanion cfg chkHandler sskHandler = do
   
   return $ Companion handle
 
-get :: Companion -> DataRequest -> IO ()
-get comp (ChkRequest k a) =
+getChk :: Companion -> ChkRequest -> IO ()
+getChk comp (ChkRequest k a) =
   let msg = T.intercalate " " ["getchk", toBase64' $ unKey k, T.pack $ show a, "\n"]
   in BS.hPut (cHandle comp) $ encodeUtf8 msg
 
-get comp (SskRequest hpk ehd e) = BS.hPut (cHandle comp) $ encodeUtf8 msg where
+getSsk :: Companion -> SskRequest -> IO ()
+getSsk comp (SskRequest hpk ehd e) = BS.hPut (cHandle comp) $ encodeUtf8 msg where
   msg = T.intercalate " " ["getssk", k $ hpk, k ehd, T.pack $ show e, "\n"]
   k = toBase64' . unKey

@@ -11,8 +11,7 @@ import Control.Applicative ( (<$>), (<*>) )
 import Data.Binary
 import Data.Conduit
 
-import qualified Freenet.Keys as FN
---import qualified Freenet.Messages as FNM
+import qualified Freenet.Chk as FN
 import qualified NextBestOnce as NBO
 import Types
 
@@ -37,7 +36,7 @@ type MessageId = Word64
 data MessagePayload a
      = Hello (Peer a)
      | Ping
-     | FreenetDataRequest FN.DataRequest  --  FNM.FreenetMessage
+     | FreenetChkRequest FN.ChkRequest
      deriving ( Show )
 
 -- |
@@ -75,7 +74,7 @@ putHeader t = put t
 instance (Binary a) => Binary (MessagePayload a) where
   put (Hello peer)                        = putHeader 1 >> put peer
   put Ping                                = putHeader 2
-  put (FreenetDataRequest dr)             = putHeader 3 >> put dr
+  put (FreenetChkRequest dr)             = putHeader 3 >> put dr
   
   get = do
     t <- getWord8
@@ -83,5 +82,5 @@ instance (Binary a) => Binary (MessagePayload a) where
     case t of
       1 -> Hello <$> get
       2 -> return Ping
-      3 -> FreenetDataRequest <$> get
+      3 -> FreenetChkRequest <$> get
       _ -> fail $ "unknown message type " ++ show t
