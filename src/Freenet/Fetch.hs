@@ -26,7 +26,7 @@ import Freenet.URI
 logI :: String -> IO ()
 logI m = infoM "freenet.fetch" m
 
-requestNodeData :: Node a -> URI -> IO (Either T.Text BSL.ByteString)
+requestNodeData :: (Show a) => Node a -> URI -> IO (Either T.Text BSL.ByteString)
 requestNodeData n (CHK loc key e _) = do
   result <- requestChk n $ ChkRequest loc (chkExtraCrypto e)
 
@@ -38,7 +38,7 @@ requestNodeData n (CHK loc key e _) = do
 -- Tries to fetch the specified URI, parses metadata if it's
 -- a control document, goes on fetching the referenced data,
 -- and finally returns everything
-fetchUri :: Node a -> URI -> IO (Either T.Text BSL.ByteString)
+fetchUri :: (Show a) => Node a -> URI -> IO (Either T.Text BSL.ByteString)
 fetchUri fn uri = do
   logI $ "fetching " ++ show uri
   
@@ -53,12 +53,12 @@ fetchUri fn uri = do
                            Right md -> resolvePath fn (uriPath uri) Nothing (Just md)
                        else return $ Right plaintext
 
-fetchUris :: Node a -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
+fetchUris :: Show a => Node a -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
 fetchUris fn uris = do
   result <- sequence $ map (requestNodeData fn) uris
   return $ zip uris result
 
-fetchRedirect :: Node a -> RedirectTarget -> [T.Text] -> IO (Either T.Text BSL.ByteString)
+fetchRedirect :: Show a => Node a -> RedirectTarget -> [T.Text] -> IO (Either T.Text BSL.ByteString)
 fetchRedirect fn (RedirectKey _ uri) path = fetchUri fn $ appendUriPath uri path
 --                                            if isControlDocument uri
 --                                            then fetchUri fn $ appendUriPath uri path
@@ -80,7 +80,7 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) _ = do -- TODO: we're not ret
 
 type Archive = Map.Map String BSL.ByteString
 
-fetchArchive :: Node a -> RedirectTarget -> ArchiveManifestType -> IO (Either T.Text Archive)
+fetchArchive :: Show a => Node a -> RedirectTarget -> ArchiveManifestType -> IO (Either T.Text Archive)
 fetchArchive fn tgt tp = do
   logI $ "fetching archive"
   arch <- fetchRedirect fn tgt []
@@ -98,7 +98,7 @@ fetchArchive fn tgt tp = do
       
 -- | FIXME: watch out for infinite redirects
 resolvePath
-  :: Node a
+  :: Show a => Node a
   -> [T.Text]                          -- ^ path elements to be resolved
   -> Maybe Archive                     -- ^ archive to resolve simple redirects etc against
   -> Maybe Metadata                    -- ^ the metadata where we try to locate the entries in

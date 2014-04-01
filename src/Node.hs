@@ -38,6 +38,7 @@ import System.Log.Logger
 
 import qualified Freenet as FN
 import qualified Freenet.Chk as FN
+import qualified Freenet.Types as FN
 import Message as MSG
 import qualified NextBestOnce as NBO
 import Types
@@ -83,25 +84,35 @@ mkNode self fn = do
         
   return $ Node peers self nmid msgMap nbo fn
 
+--waitResponse :: RoutedMessage
+
+keyToTarget :: FN.Key -> NodeId
+keyToTarget key = mkNodeId' $ FN.unKey key
+
 -- |
 -- Handle a data request at node level. This means we first ask our Freenet layer
 -- if it has the data in it's stores, and if this fails we route a message to our
 -- peer nodes.
-requestChk :: Node a -> FN.ChkRequest -> IO (Either T.Text FN.ChkBlock)
+requestChk :: (Show a) => Node a -> FN.ChkRequest -> IO (Either T.Text FN.ChkBlock)
 requestChk n req = do
   local <- FN.getChk (nodeFreenet n) req
   case local of
     Right blk -> return $ Right blk
     Left e    -> do
       logI $ "could not fetch data locally " ++ show e
+      msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest req)
+      sendRoutedMessage n msg
       return $ Left e
+
+mkRoutedMessage :: Node a -> NodeId -> MessagePayload a -> IO (RoutedMessage a)
+mkRoutedMessage node target msg = atomically $ do
+  mid <- readTVar (nextMsgId node)
+  modifyTVar (nextMsgId node) (+1)
+  return $ RoutedMessage msg mid $ NBO.mkRoutingInfo target
   
-sendRoutedMessage :: Show a => Node a -> NodeId -> MessagePayload a -> IO ()
-sendRoutedMessage node target msg = do
-  result <- atomically $ do
-    mid <- readTVar (nextMsgId node)
-    modifyTVar (nextMsgId node) (+1)
-    NBO.route (nodeNbo node) Nothing (RoutedMessage msg mid $ NBO.mkRoutingInfo target)
+sendRoutedMessage :: (Show a) => Node a -> RoutedMessage a -> IO ()
+sendRoutedMessage node msg = do
+  result <- atomically $ NBO.route (nodeNbo node) Nothing msg
 
   case result of
     NBO.Forward dest msg -> do
@@ -109,19 +120,17 @@ sendRoutedMessage node target msg = do
       atomically $ enqMessage dest $ Routed msg
     x -> do
       print ("unhandled routing result", x)
-      
-  print result
-  return ()
 
 handlePeerMessage :: Show a => Node a -> PeerNode a -> Message a -> IO ()
-handlePeerMessage node pn (Routed (RoutedMessage rmsg mid ri)) = do
+handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = do
   -- record routing state
 --  atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rmsg, ri) m
   case rmsg of
-    FreenetChkRequest dr -> do
-      let fn = nodeFreenet node
-      
-      logW $ "don't know how to do this."
+    FreenetChkRequest req -> do
+      local <- FN.getChk (nodeFreenet node) req
+      case local of
+        Left e -> sendRoutedMessage node rm -- pass on
+        Right blk -> logW $ "don't know how to send data back"
       
     x -> print ("unhandled routed message", x)
       

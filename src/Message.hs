@@ -42,6 +42,7 @@ data MessagePayload a
 -- |
 -- a message which should be routed to another peer
 data Message a = Routed (RoutedMessage a)
+               | Response MessageId (MessagePayload a)
                | Direct (MessagePayload a)
                deriving (Show)
 
