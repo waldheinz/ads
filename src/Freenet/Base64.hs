@@ -4,7 +4,7 @@ module Freenet.Base64 (
   FreenetBase64(..),
 
   -- * Integer utilities
-  i2bs, bs2i
+  i2bs, bs2i, bsToPosI
 ) where
 
 import Data.Bits ( shiftL, shiftR )
@@ -73,6 +73,9 @@ bs2i b
       b' = b -- B.dropWhile (==0) b -- drop leading 0s
       sign = B.index b' 0 > 127
       go = B.foldl' (\i bb -> (i `shiftL` 8) + fromIntegral bb) 0 
+
+bsToPosI :: B.ByteString -> Integer
+bsToPosI = B.foldl' (\i bb -> (i `shiftL` 8) + fromIntegral bb) 0 
 
 i2bs :: Integer -> B.ByteString
 i2bs x

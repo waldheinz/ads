@@ -54,25 +54,19 @@ initFn cfg = do
 
 offerSsk :: Freenet a -> Bool -> SskBlock -> STM ()
 offerSsk fn toStore df = do
-  -- write to our store
   when toStore $ FS.putData (fnSskStore fn) df
-  
-  -- broadcast arrival
   writeTChan (fnIncomingSsk fn) df
 
 offerChk :: Freenet a -> Bool -> ChkBlock -> STM ()
 offerChk fn toStore df = do
-  -- write to our store
   when toStore $ FS.putData (fnChkStore fn) df
-  
-  -- broadcast arrival
   writeTChan (fnIncomingChk fn) df
 
 waitKeyTimeout :: DataBlock f => TChan f -> Key -> IO (TMVar (Maybe f))
 waitKeyTimeout chan loc = do
   bucket  <- newEmptyTMVarIO
   timeout <- registerDelay $ 10 * 1000 * 1000
-  chan'    <- atomically $ dupTChan chan
+  chan'   <- atomically $ dupTChan chan
   
   -- wait for data or timeout
   void $ forkIO $ atomically $ orElse

@@ -69,8 +69,8 @@ sskHeaderHashId h = runGet getWord16be $ BSL.fromStrict $ unSskHeader h
 -- Returns the signature (r, s) parameter for verifying the payload.
 sskHeaderRS :: SskHeader -> (Integer, Integer)
 sskHeaderRS h = (r, s) where
-  r = bs2i $ BS.take 32 $ BS.drop 72 $ unSskHeader h
-  s = bs2i $ BS.take 32 $ BS.drop 104 $ unSskHeader h
+  r = bsToPosI $ BS.take 32 $ BS.drop 72 $ unSskHeader h
+  s = bsToPosI $ BS.take 32 $ BS.drop 104 $ unSskHeader h
 
 -- |
 -- Returns the encrypted part of the header, which holds the
