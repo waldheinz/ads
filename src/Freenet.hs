@@ -80,36 +80,6 @@ waitKeyTimeout chan loc = do
     (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
 
   return bucket
-  
-{-
-requestData :: Freenet a -> URI -> IO (Either T.Text BSL.ByteString)
-requestData fn uri = logI ("data request for " ++ show uri) >> let dr = toDataRequest uri in case dr of
-  ChkRequest {} -> do
-    let 
-      l = dataRequestLocation dr
-      chan = fnIncomingChk fn
-      
-    bucket <- waitKeyTimeout (chan) l
-    handleDataRequest fn dr
-    md <- atomically $ readTMVar bucket
-  
-    return $ case md of
-      Nothing -> Left "requestData: timeout"
-      Just d  -> decryptDataFound d (uriCryptoKey uri) (uriCryptoAlg uri)
-      
-  SskRequest {} -> do
-    let 
-      l = dataRequestLocation dr
-      chan = fnIncomingSsk fn
-      
-    bucket <- waitKeyTimeout (chan) l
-    handleDataRequest fn dr
-    md <- atomically $ readTMVar bucket
-    
-    return $ case md of
-      Nothing -> Left "requestData: timeout"
-      Just d  -> decryptDataFound d (uriCryptoKey uri) (uriCryptoAlg uri)
--}
 
 -- |
 -- Tries to fetch CHK data either from the store or our

@@ -17,6 +17,7 @@ import Data.Binary.Put ( runPut )
 import qualified Data.ByteString.Lazy as BSL
 import Data.Hashable
 import System.IO
+import System.Log.Logger
 
 import Freenet.Types
 
@@ -26,7 +27,7 @@ import Freenet.Types
 
 data StoreRequest f
      = ReadRequest Key (TMVar (Maybe f)) -- ^ the request and where to put the data when found
-     | WriteRequest f                   -- ^ the data to put in the store
+     | WriteRequest f                    -- ^ the data to put in the store
 
 data StoreFile f = StoreFile
                      { _sfThread :: ! ThreadId
@@ -34,6 +35,9 @@ data StoreFile f = StoreFile
                      , _sfHandle :: ! Handle
                      }
 
+logI :: String -> IO ()
+logI m = infoM "freenet.store" m
+  
 mkStoreFile :: StorePersistable f => f -> FilePath -> Int -> IO (StoreFile f)
 mkStoreFile sp fileName count = do
   rq <- newTBQueueIO 10
@@ -62,21 +66,19 @@ mkStoreFile sp fileName count = do
       offsets   = getOffsets loc
       go []     = atomically $ putTMVar bucket Nothing -- no offsets left, terminate
       go (o:os) = do
---        print $ "checking read " ++ show o
-        
         hSeek handle AbsoluteSeek o
         d <- BSL.hGet handle entrySize
         
         case runGetOrFail doGet d of
-          Left  (_, _, _)  -> (print $ "nothing to read at " ++ show o) >> go os
+          Left  (_, _, _)  -> go os
           Right (_, _, df) -> if loc == dataBlockLocation df
                               then atomically $ putTMVar bucket $ Just df
-                              else print ("something else at " ++ show o) >>  go os
+                              else go os
           
     doWrite df = go offsets where
       loc       = dataBlockLocation df
       offsets   = getOffsets loc
-      go []     = print "no free slots"
+      go []     = logI "no free slots in store"
       go (o:os) = do
         hSeek handle AbsoluteSeek o
         d <- BSL.hGet handle 1
@@ -84,7 +86,6 @@ mkStoreFile sp fileName count = do
           Right (_, _, free) -> do
             if free
               then do
---                print $ "no valid data at " ++ show o ++ ": " ++ e
                 hSeek handle AbsoluteSeek o
                 BSL.hPut handle $ runPut $ doPut df
                 print $ "written at " ++ show o
