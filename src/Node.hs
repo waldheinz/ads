@@ -90,7 +90,7 @@ waitResponse node mid = do
 
   let
     checkResponse msg = case msg of
-      (_, (Response mid' rp)) -> putTMVar bucket $ Just rp
+      (_, (Response mid' rp)) -> if mid == mid' then (putTMVar bucket $ Just rp) else retry
       _                       -> retry
   
   -- wait for data or timeout
@@ -181,10 +181,14 @@ handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = do
     FreenetChkRequest req -> do
       local <- FN.getChk (nodeFreenet node) req
       case local of
-        Left e -> sendRoutedMessage node rm -- pass on
+        Left _    -> sendRoutedMessage node rm -- pass on
         Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
-      
-    x -> print ("unhandled routed message", x)
+
+    FreenetSskRequest req -> do
+      local <- FN.getSsk (nodeFreenet node) req
+      case local of
+        Left _    -> sendRoutedMessage node rm
+        Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
       
 type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
 
