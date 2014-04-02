@@ -61,14 +61,14 @@ initCompanion cfg chkHandler sskHandler = do
 
       "ssk" -> do
         let 
-          (ktxt, rest) = breakSpace args
+          (ktxt, rest)   = breakSpace args
           (pktxt, rest') = breakSpace rest
           (hstr, rest'') = breakSpace rest'
           df = do
-            loc <- fromBase64' ktxt >>= mkKey
+            loc    <- fromBase64' ktxt  >>= mkKey
             pubkey <- fromBase64' pktxt >>= mkPubKey
-            hdr <- fromBase64' hstr >>= mkSskHeader
-            d <- fromBase64' rest''
+            hdr    <- fromBase64' hstr  >>= mkSskHeader
+            d      <- fromBase64' rest''
             mkSskBlock loc hdr d pubkey
 
         case df of

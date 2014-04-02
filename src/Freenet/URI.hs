@@ -4,7 +4,7 @@
 module Freenet.URI (
   URI(..), parseUri,
   isControlDocument, uriPath, uriCryptoKey,
-  uriCryptoAlg, appendUriPath,
+  appendUriPath,
 
   -- * CHKs
   ChkExtra, mkChkExtra, chkExtraCrypto,
@@ -50,10 +50,6 @@ instance Show URI where
 uriCryptoKey :: URI -> Key
 uriCryptoKey (CHK _ k _ _)   = k
 uriCryptoKey (SSK _ k _ _ _) = k
-
-uriCryptoAlg :: URI -> Word8
-uriCryptoAlg (CHK _ _ e _)   = chkExtraCrypto e
-uriCryptoAlg (SSK _ _ e _ _) = sskExtraCrypto e
 
 appendUriPath :: URI -> [T.Text] -> URI
 appendUriPath uri@(CHK {}) p = uri { chkPath = p }
@@ -101,9 +97,9 @@ parseSsk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') s
   [rstr, cstr, estr] -> do
     rk <- fromBase64' rstr >>= mkKey
     ck <- fromBase64' cstr >>= mkKey
-    e <- fromBase64' estr >>= \eb -> if BS.length eb == 5
-                                     then Right $ eb
-                                     else Left "CHK extra data must be 5 bytes"
+    e  <- fromBase64' estr >>= \eb -> if BS.length eb == 5
+                                      then Right $ eb
+                                      else Left "CHK extra data must be 5 bytes"
     let
       path' = T.drop 1 path
       ps = if T.null path' then [] else  T.split (== '/') path'
@@ -137,15 +133,7 @@ parseChk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') s
 -- by the URI and specify an MIME type.
 isControlDocument :: URI -> Bool
 isControlDocument (CHK _ _ e _)   = chkExtraIsControl e
-isControlDocument (SSK _ _ _ _ _) = True -- ^ to my knowledge, this is so
-
--- |
--- Determines the location (aka "routing key") for an URI.
-{-
-uriLocation :: URI -> Key
-uriLocation (CHK loc _ _ _) = loc
-uriLocation (SSK hpk ck _ doc _) = sskLocation' hpk ck doc
--}
+isControlDocument (SSK _ _ _ _ _) = True -- to my knowledge, this is always true
 
 uriPath :: URI -> [T.Text]
 uriPath (CHK _ _ _ p)   = p
