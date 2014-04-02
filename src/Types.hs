@@ -80,10 +80,10 @@ data Peer a = Peer
             , peerAddress  :: a               -- ^ where this peer might be connected
             } deriving ( Show )
 
-instance (Show a) => Eq (Peer a) where
+instance Eq (Peer a) where
   (==) p1 p2 = (peerNodeInfo p1) == (peerNodeInfo p2)
 
-instance (Show a, FromJSON a) => FromJSON (Peer a) where
+instance FromJSON a => FromJSON (Peer a) where
   parseJSON (Object v) = Peer <$>
                          v .: "node" <*>
                          v .: "address"

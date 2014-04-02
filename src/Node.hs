@@ -19,16 +19,16 @@ module Node (
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
-import Control.Concurrent ( forkIO )
+import Control.Concurrent ( forkIO, killThread )
 import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
 import Control.Monad ( forever, unless, void, when )
 import Control.Monad.IO.Class ( liftIO )
+import Data.Aeson
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 import qualified Data.Conduit.TQueue as C
-import Data.Aeson
 import Data.List ( (\\) )
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
@@ -213,6 +213,9 @@ initPeers node connect dataDir = do
 addPeer :: Peers a -> PeerNode a -> STM ()
 addPeer p n = modifyTVar' (peersConnected p) ((:) n)
 
+removePeer :: Peers a -> PeerNode a -> STM ()
+removePeer p n = modifyTVar' (peersConnected p) $ filter (/= n)
+
 maintainConnections :: (Show a) => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
   -- we simply try to maintain a connection to all known peers for now
@@ -255,10 +258,13 @@ data PeerNode a
     { nodePeer :: Peer a
     , nQueue   :: TBMQueue (Message a) -- ^ outgoing message queue to this node
     }
-
+             
 instance (Show a) => Show (PeerNode a) where
   show n = "Node {peer = " ++ show (nodePeer n) ++ " }"
-  
+
+instance Eq (PeerNode a) where
+  (PeerNode p1 _) == (PeerNode p2 _) = p1 == p2
+
 -- | puts a message on the Node's outgoing message queue       
 enqMessage :: PeerNode a -> Message a -> STM ()
 enqMessage n m = writeTBMQueue (nQueue n) m
@@ -276,24 +282,29 @@ runPeerNode
   -> IO ()
 runPeerNode node (src, sink) outbound = do
   mq <- newTBMQueueIO 5
-  
+    
   -- enqueue the obligatory Hello message, if this is an
   -- outgoing connection
   when outbound $ atomically $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
 
-  void $ forkIO $ src C.$$ C.awaitForever $ \msg -> do
+  tid <- forkIO $ src C.$$ C.awaitForever $ \msg -> do
     case msg of
       Direct (Hello p) -> do
         let pn = PeerNode p mq
         
         liftIO $ do
           logI $ "got hello from " ++ show pn
+          
           atomically $ do
             unless outbound $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node) 
             addPeer (nodePeers node) pn
           
-        C.mapM_ (handlePeerMessage node pn)
+        C.addCleanup
+          (\_ -> do
+              logI $ "lost connection to " ++ (show $ peerNodeInfo $ nodePeer pn)
+              atomically $ removePeer (nodePeers node) pn)
+          (C.mapM_ $ handlePeerMessage node pn)
         
       x       -> error $ show x
         
-  C.sourceTBMQueue mq C.$$ sink
+  C.addCleanup (\_ -> killThread tid) (C.sourceTBMQueue mq) C.$$ sink
