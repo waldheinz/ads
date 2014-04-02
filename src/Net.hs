@@ -22,6 +22,7 @@ import Data.Conduit
 import Data.Conduit.Network
 import Data.Conduit.Serialization.Binary
 import qualified Data.Vector as V
+import System.IO.Error ( catchIOError )
 
 import Logging
 import Node
@@ -66,7 +67,7 @@ nodeListen cfg node = do
     
   void $ forkIO $ runTCPServer s $ \ad -> do
     logI $ "incoming connection from " ++ (show $ appSockAddr ad)
-    runPeerNode node (appSource ad $= conduitDecode, conduitEncode =$ appSink ad) False
+    runPeerNode node (appSource ad $= conduitDecode, conduitEncode =$ appSink ad) Nothing
 
   infoM "net" $ "node listening on " ++ host ++ ":" ++ show port
 
@@ -74,7 +75,9 @@ tcpConnect :: ConnectFunction TcpAddressInfo
 tcpConnect peer handler = do
   let (AI addrs) = peerAddress peer
   if null addrs
-    then handler $ Left "no addresses"
-    else let TcpAddress host port = head addrs in do -- TODO: deal with multiple adresses
-      runTCPClient (clientSettings port $ BSC.pack host) $ \ad -> do
-        handler $ Right (appSource ad $= conduitDecode, conduitEncode =$ appSink ad)
+    then handler $ Left "no addresses"  -- TODO: deal with multiple adresses
+    else let TcpAddress host port = head addrs in
+      catchIOError
+           (runTCPClient (clientSettings port $ BSC.pack host) $ \ad -> 
+               handler $ Right (appSource ad $= conduitDecode, conduitEncode =$ appSink ad))
+           (\e -> handler $ Left $ show e)

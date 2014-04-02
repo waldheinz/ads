@@ -25,6 +25,7 @@ import qualified Data.Conduit.List as C
 import qualified Data.Conduit.TQueue as C
 import Data.List ( (\\) )
 import qualified Data.Map.Strict as Map
+import Data.Maybe ( isJust )
 import qualified Data.Text as T
 import Data.Word
 import System.FilePath ( (</>) )
@@ -205,44 +206,53 @@ initPeers node connect dataDir = do
       atomically $ writeTVar (peersKnown $ nodePeers node) peers
 
 addPeer :: Peers a -> PeerNode a -> STM ()
-addPeer p n = modifyTVar' (peersConnected p) ((:) n)
-
+addPeer p n = do
+  modifyTVar' (peersConnecting p) $ filter (/= nodePeer n)
+  modifyTVar' (peersConnected p) ((:) n)
+  
 removePeer :: Peers a -> PeerNode a -> STM ()
-removePeer p n = modifyTVar' (peersConnected p) $ filter (/= n)
+removePeer p n = do
+  modifyTVar' (peersConnecting p) $ filter (/= nodePeer n)
+  modifyTVar' (peersConnected p)  $ filter (/= n)
 
 maintainConnections :: (Show a) => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
   -- we simply try to maintain a connection to all known peers for now
 
+  -- one connection attempt every 10 seconds
+  delay <- registerDelay $ 10 * 1000 * 1000
+  
   let
     peers = nodePeers node
   
   shouldConnect <- atomically $ do
+    readTVar delay >>= check
+    
     known <- readTVar $ peersKnown peers
     cting <- readTVar $ peersConnecting peers
     connected <- readTVar $ peersConnected peers
   
     let
-      result = known \\ cting
-      result' = result \\ (map nodePeer connected)
+      result = (known \\ cting) \\ (map nodePeer connected)
 
-    if null result'
+    if null result
       then retry
       else do
-        let result'' = head result'
-        modifyTVar (peersConnecting peers) ((:) result'')
-        return result''
+        let result' = head result
+        modifyTVar (peersConnecting peers) ((:) result')
+        return result'
 
   logI $ "connecting to " ++ show shouldConnect
-  connect shouldConnect $ \cresult -> do
+  void $ forkIO $ connect shouldConnect $ \cresult -> do
     case cresult of
       Left e -> do
         logW $ "error connecting: " ++ e ++ " on " ++ show shouldConnect
-        atomically $ modifyTVar (peersConnecting peers) (filter ((==) shouldConnect))
+        atomically $ modifyTVar (peersConnecting peers) (filter $ (/= shouldConnect))
+      
       Right msgio -> do
-        logI "connected!"
-        runPeerNode node msgio True
-  
+        logI $ "connected to " ++ show shouldConnect
+        runPeerNode node msgio (Just shouldConnect)
+
 -------------------------------------------------------------------------
 -- Peer Nodes
 -------------------------------------------------------------------------
@@ -272,27 +282,32 @@ runPeerNode
   :: (Show a)
   => Node a
   -> MessageIO a -- ^ the (source, sink) pair to talk to the peer
-  -> Bool        -- ^ if this is an outbound connection
+--  -> Bool        -- ^ if this is an outbound connection
+  -> Maybe (Peer a)
   -> IO ()
-runPeerNode node (src, sink) outbound = do
+runPeerNode node (src, sink) expected = do
   mq <- newTBMQueueIO 5
-    
+  
   -- enqueue the obligatory Hello message, if this is an
   -- outgoing connection
-  when outbound $ atomically $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
-
+  when (isJust expected) $ atomically $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
+  
   tid <- forkIO $ src C.$$ C.awaitForever $ \msg -> do
     case msg of
       Direct (Hello p) -> do
+        case expected of
+          Nothing -> return ()
+          Just e -> when (e /= p) $ error "node identity mismatch"
+            
         let pn = PeerNode p mq
         
         liftIO $ do
           logI $ "got hello from " ++ show pn
           
           atomically $ do
-            unless outbound $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node) 
+            unless (isJust expected) $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
             addPeer (nodePeers node) pn
-          
+            
         C.addCleanup
           (\_ -> do
               logI $ "lost connection to " ++ (show $ peerNodeInfo $ nodePeer pn)
