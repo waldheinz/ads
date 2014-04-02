@@ -3,19 +3,13 @@
 
 module Node (
   -- * our node
-  Node, mkNode,
---  handlePeerMessage, sendRoutedMessage,
-  requestChk,
+  Node, mkNode, requestChk,
   
-  -- * Peers
-  ConnectFunction,
-  Peers, mkPeers, initPeers,--  addPeer,
+  -- * peers
+  ConnectFunction, initPeers,
   
   -- * other nodes we're connected to
-  PeerNode, nodePeer, enqMessage,
-  
-  -- * incoming / outgoig messages
-  runPeerNode
+  PeerNode, runPeerNode  
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
