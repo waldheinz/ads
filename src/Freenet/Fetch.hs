@@ -20,6 +20,7 @@ import Node
 import Freenet.Chk
 import Freenet.Compression
 import Freenet.Metadata
+import Freenet.Ssk
 import Freenet.Types
 import Freenet.URI
 
@@ -27,13 +28,20 @@ logI :: String -> IO ()
 logI m = infoM "freenet.fetch" m
 
 requestNodeData :: (Show a) => Node a -> URI -> IO (Either T.Text BSL.ByteString)
-requestNodeData n (CHK loc key e _) = do
-  result <- requestChk n $ ChkRequest loc (chkExtraCrypto e)
+requestNodeData n (CHK loc key extra _) = do
+  result <- requestChk n $ ChkRequest loc (chkExtraCrypto extra)
 
   return $ case result of
     Left e    -> Left e
-    Right blk -> decryptDataBlock blk key $ chkExtraCrypto e
+    Right blk -> decryptDataBlock blk key $ chkExtraCrypto extra
 
+requestNodeData n (SSK pkh key extra dn _) = do
+  result <- requestSsk n $ SskRequest pkh (sskEncryptDocname key dn) (sskExtraCrypto extra)
+
+  return $ case result of
+    Left e    -> Left e
+    Right blk -> decryptDataBlock blk key $ sskExtraCrypto extra
+  
 -- |
 -- Tries to fetch the specified URI, parses metadata if it's
 -- a control document, goes on fetching the referenced data,

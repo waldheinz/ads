@@ -28,7 +28,7 @@ data Companion = Companion
                  { cHandle :: Handle
                  }
 
-initCompanion :: CFG.Config -> (ChkBlock -> STM ()) -> (SskFound -> STM ()) -> IO Companion
+initCompanion :: CFG.Config -> (ChkBlock -> STM ()) -> (SskBlock -> STM ()) -> IO Companion
 initCompanion cfg chkHandler sskHandler = do
   host <- CFG.require cfg "host"
   port <- CFG.require cfg "port" :: IO Int
@@ -69,7 +69,7 @@ initCompanion cfg chkHandler sskHandler = do
             pubkey <- fromBase64' pktxt >>= mkPubKey
             hdr <- fromBase64' hstr >>= mkSskHeader
             d <- fromBase64' rest''
-            mkSskFound loc hdr d pubkey
+            mkSskBlock loc hdr d pubkey
 
         case df of
           Left e  -> putStrLn $ "could not parse SSK found response: " ++ T.unpack e

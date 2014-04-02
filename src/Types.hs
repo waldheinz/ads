@@ -93,6 +93,6 @@ instance (Binary a) => Binary (Peer a) where
   put (Peer ni addr) = put ni >> put addr
   get = Peer <$> get <*> get
 
-mkPeer :: (Show a) => NodeInfo -> a -> Peer a
+mkPeer :: NodeInfo -> a -> Peer a
 mkPeer ni addr = Peer ni addr
 

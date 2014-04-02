@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet (
-  Freenet, initFn, getChk,
+  Freenet, initFn, getChk, getSsk
   ) where
 
 import Control.Concurrent ( forkIO )
@@ -12,7 +12,6 @@ import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import qualified Data.Text as T
 import System.FilePath ( (</>) )
-import System.Log.Logger
 
 import Freenet.Chk
 import qualified Freenet.Companion as FC
@@ -22,13 +21,11 @@ import Freenet.Types
 
 data Freenet a = FN
                { fnChkStore    :: FS.StoreFile ChkBlock
+               , fnSskStore    :: FS.StoreFile SskBlock
                , fnCompanion   :: Maybe FC.Companion
                , fnIncomingChk :: TChan ChkBlock
-               , fnIncomingSsk :: TChan SskFound
+               , fnIncomingSsk :: TChan SskBlock
                }
-
-logI :: String -> IO ()
-logI m = infoM "freenet" m
 
 -- | initializes Freenet subsystem
 initFn :: CFG.Config -> IO (Freenet a)
@@ -37,11 +34,14 @@ initFn cfg = do
   dsdir       <- CFG.require cfg "datastore.directory"
   chkCount    <- CFG.require cfg "datastore.chk-count"
   chkStore    <- FS.mkStoreFile (undefined :: ChkBlock) (dsdir </> "store-chk") chkCount
+
+  sskCount    <- CFG.require cfg "datastore.ssk-count"
+  sskStore    <- FS.mkStoreFile (undefined :: SskBlock) (dsdir </> "store-ssk") sskCount
   
   chkIncoming <- newBroadcastTChanIO
   sskIncoming <- newBroadcastTChanIO
   
-  let fn = FN chkStore Nothing chkIncoming sskIncoming
+  let fn = FN chkStore sskStore Nothing chkIncoming sskIncoming
 
   -- companion
   let ccfg = CFG.subconfig "companion" cfg
@@ -52,10 +52,10 @@ initFn cfg = do
       comp <- FC.initCompanion ccfg (offerChk fn True) (offerSsk fn True)
       return $ fn { fnCompanion = Just comp }
 
-offerSsk :: Freenet a -> Bool -> SskFound -> STM ()
-offerSsk fn _ df = do
+offerSsk :: Freenet a -> Bool -> SskBlock -> STM ()
+offerSsk fn toStore df = do
   -- write to our store
---  when toStore $ FS.putData (fnSskStore fn) df
+  when toStore $ FS.putData (fnSskStore fn) df
   
   -- broadcast arrival
   writeTChan (fnIncomingSsk fn) df
@@ -96,6 +96,23 @@ getChk fn dr = do
         Just c  -> do
           bucket <- waitKeyTimeout (fnIncomingChk fn) (dataRequestLocation dr)
           FC.getChk c dr
+          md <- atomically $ readTMVar bucket
+  
+          return $ case md of
+            Nothing -> Left "timeout waiting for companion"
+            Just d  -> Right d
+
+getSsk :: Freenet a -> SskRequest -> IO (Either T.Text SskBlock)
+getSsk fn dr = do
+  fromStore <- FS.getData (fnSskStore fn) (dataRequestLocation dr)
+  
+  case fromStore of
+    Just blk -> return $ Right blk
+    Nothing -> case fnCompanion fn of
+        Nothing -> return $ Left "not in store, no companion"
+        Just c  -> do
+          bucket <- waitKeyTimeout (fnIncomingSsk fn) (dataRequestLocation dr)
+          FC.getSsk c dr
           md <- atomically $ readTMVar bucket
   
           return $ case md of

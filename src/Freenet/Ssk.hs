@@ -2,7 +2,7 @@
 {-# LANGUAGE MultiParamTypeClasses, OverloadedStrings #-}
 
 module Freenet.Ssk (
-  SskRequest(..), SskFound(..), mkSskFound,
+  SskRequest(..), SskBlock(..), mkSskBlock,
   sskLocation, sskLocation', sskEncryptDocname,
   
   -- * SSK Headers
@@ -89,43 +89,43 @@ sskHeaderEHDocname h = BS.take 32 $ BS.drop 4 $ unSskHeader h
 sskDataSize :: Int
 sskDataSize = 1024
 
-data SskFound = SskFound !Key !PubKey !SskHeader !BS.ByteString
+data SskBlock = SskBlock !Key !PubKey !SskHeader !BS.ByteString
 
-instance Show SskFound where
-  show (SskFound k _ h d) = "SskFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
+instance Show SskBlock where
+  show (SskBlock k _ h d) = "SskFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
 
-instance StorePersistable SskFound where
+instance StorePersistable SskBlock where
   storeSize = \_ -> 32 + pubKeySize + sskHeaderSize + sskDataSize
-  storePut = \(SskFound k pk h d) -> put k >> put pk >> put h >> putByteString d
+  storePut = \(SskBlock k pk h d) -> put k >> put pk >> put h >> putByteString d
   storeGet = do
-       (k, pk, h, d) <- (,,,) <$> get <*> get <*> get <*> getByteString sskDataSize
-       case mkSskFound k h d pk of
-         Right df -> return df
-         Left e   -> fail $ T.unpack e
+    (k, pk, h, d) <- (,,,) <$> get <*> get <*> get <*> getByteString sskDataSize
+    case mkSskBlock k h d pk of
+      Right df -> return df
+      Left e   -> fail $ T.unpack e
   
-instance DataBlock SskFound where
-  dataBlockLocation (SskFound k _ _ _) = k
-  decryptDataBlock = decryptSskFound
+instance DataBlock SskBlock where
+  dataBlockLocation (SskBlock k _ _ _) = k
+  decryptDataBlock = decryptSskBlock
 
-mkSskFound
+mkSskBlock
   :: Key                      -- ^ location
   -> SskHeader                -- ^ header
   -> BS.ByteString            -- ^ payload
   -> PubKey                   -- ^ public key needed for verifying the signature
-  -> Either T.Text SskFound
-mkSskFound k h d pk
+  -> Either T.Text SskBlock
+mkSskBlock k h d pk
   | sskHeaderHashId h /= 1 = Left "hash must be SHA-256"
   | not (DSA.verify dsaMod (unPublicKey pk) sig overallHash)
     = Left "signature did not verify"
-  | otherwise = Right  $ SskFound k pk h d
+  | otherwise = Right  $ SskBlock k pk h d
   where
     overallHash = BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [hashHeader, dataHash]
     dataHash =  BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromStrict d
     hashHeader = BS.take 72 $ unSskHeader h
     sig = uncurry DSA.Signature $ (sskHeaderRS h)
 
-decryptSskFound :: SskFound -> Key -> Word8 -> Either T.Text BSL.ByteString
-decryptSskFound (SskFound _ _ h d) key calg
+decryptSskBlock :: SskBlock -> Key -> Word8 -> Either T.Text BSL.ByteString
+decryptSskBlock (SskBlock _ _ h d) key calg
   | calg /= 2 = Left $ T.pack $ "unknown SSK crypto algorithm " ++ show calg
   | dataLength < (fromIntegral origDataLength) = Left $ "data length mismatch"
   | otherwise = Right $ BSL.take (fromIntegral origDataLength) plaintext
@@ -258,4 +258,7 @@ data SskRequest = SskRequest
 instance Binary SskRequest where
   put (SskRequest pk eh a) = put pk >> put eh >> put a
   get = SskRequest <$> get <*> get <*> get
+  
+instance DataRequest SskRequest where
+  dataRequestLocation (SskRequest pkh ehd _) = sskLocation' pkh ehd
   

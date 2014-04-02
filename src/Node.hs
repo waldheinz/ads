@@ -3,7 +3,7 @@
 
 module Node (
   -- * our node
-  Node, mkNode, requestChk,
+  Node, mkNode, requestChk, requestSsk,
   
   -- * peers
   ConnectFunction, initPeers,
@@ -33,6 +33,7 @@ import System.Log.Logger
 
 import qualified Freenet as FN
 import qualified Freenet.Chk as FN
+import qualified Freenet.Ssk as FN
 import qualified Freenet.Types as FN
 import Message as MSG
 import qualified NextBestOnce as NBO
@@ -125,21 +126,36 @@ requestChk n req = do
           (FreenetChkBlock blk) -> return $ Right blk
           x                     -> return $ Left $ "expected CHK block, but got: " `T.append` (T.pack $ show x)
 
+requestSsk :: (Show a) => Node a -> FN.SskRequest -> IO (Either T.Text FN.SskBlock)
+requestSsk n req = do
+  local <- FN.getSsk (nodeFreenet n) req
+  case local of
+    Right blk -> return $ Right blk
+    Left e    -> return $ Left e
+{-      logI $ "could not fetch data locally " ++ show e
+      msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest req)
+      bucket <- waitResponse n $ rmId msg
+      sendRoutedMessage n msg
+      result <- atomically $ takeTMVar bucket
+      case result of
+        Nothing   -> return $ Left "timeout waiting for response"
+        Just resp -> case resp of
+          (FreenetChkBlock blk) -> return $ Right blk
+          x                     -> return $ Left $ "expected CHK block, but got: " `T.append` (T.pack $ show x)
+-}
+
 mkRoutedMessage :: Node a -> NodeId -> MessagePayload a -> IO (RoutedMessage a)
 mkRoutedMessage node target msg = atomically $ do
   mid <- readTVar (nextMsgId node)
   modifyTVar (nextMsgId node) (+1)
   return $ RoutedMessage msg mid $ NBO.mkRoutingInfo target
-  
-sendRoutedMessage :: (Show a) => Node a -> RoutedMessage a -> IO ()
+
+sendRoutedMessage :: Node a -> RoutedMessage a -> IO ()
 sendRoutedMessage node msg = do
   result <- atomically $ NBO.route (nodeNbo node) Nothing msg
 
   case result of
-    NBO.Forward dest msg -> do
-      print ("forwarding to", dest)
-      atomically $ enqMessage dest $ Routed msg
-    x -> print ("unhandled routing result", x)
+    NBO.Forward dest msg -> atomically $ enqMessage dest $ Routed msg
 
 sendResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
 sendResponse node mid msg = do
