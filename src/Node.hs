@@ -57,9 +57,10 @@ data Node a = Node
             { nodePeers    :: Peers a
             , nodeIdentity :: Peer a
             , nextMsgId    :: TVar Word64
-            , nodeActMsgs  :: TVar (Map.Map Word64 (PeerNode a, MessagePayload a, NBO.RoutingInfo NodeId)) -- ^ messages we're currently routing
+            , nodeActMsgs  :: TVar (Map.Map MessageId (PeerNode a, MessagePayload a, NBO.RoutingInfo NodeId)) -- ^ messages we're currently routing
             , nodeNbo      :: NBO.Node NodeId (RoutedMessage a) (PeerNode a)      -- ^ our NBO identity for routing
             , nodeFreenet  :: FN.Freenet a                                        -- ^ our freenet compatibility layer
+            , nodeIncoming :: TChan (PeerNode a, Message a)                       -- ^ stream of incoming messages
             }
 
 mkNode :: (Show a) => Peer a -> FN.Freenet a -> IO (Node a)
@@ -70,7 +71,8 @@ mkNode self fn = do
     return (ps, mid)
 
   msgMap <- newTVarIO Map.empty
-    
+  incoming <- newBroadcastTChanIO
+  
   let
     fst' (a, _, _) = a
     nbo = NBO.Node
@@ -82,10 +84,28 @@ mkNode self fn = do
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
         
-  return $ Node peers self nmid msgMap nbo fn
+  return $ Node peers self nmid msgMap nbo fn incoming
 
---waitResponse :: RoutedMessage
+waitResponse :: Node a -> MessageId -> IO (TMVar (Maybe (MessagePayload a)))
+waitResponse node mid = do
+  timeout <- registerDelay (30 * 1000 * 1000)
+  bucket  <- newEmptyTMVarIO
+  chan    <- atomically $ dupTChan (nodeIncoming node)
 
+  let
+    checkResponse msg = case msg of
+      (_, (Response mid' rp)) -> putTMVar bucket $ Just rp
+      _                       -> retry
+  
+  -- wait for data or timeout
+  void $ forkIO $ atomically $ orElse
+    (readTChan chan   >>= checkResponse)
+    (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
+
+  return bucket
+
+-- |
+-- Turn a Freenet @Key@ into a @NodeId@ by repacking the 32 bytes.
 keyToTarget :: FN.Key -> NodeId
 keyToTarget key = mkNodeId' $ FN.unKey key
 
@@ -101,8 +121,14 @@ requestChk n req = do
     Left e    -> do
       logI $ "could not fetch data locally " ++ show e
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest req)
+      bucket <- waitResponse n $ rmId msg
       sendRoutedMessage n msg
-      return $ Left e
+      result <- atomically $ takeTMVar bucket
+      case result of
+        Nothing   -> return $ Left "timeout waiting for response"
+        Just resp -> case resp of
+          (FreenetChkBlock blk) -> return $ Right blk
+          x                     -> return $ Left $ "expected CHK block, but got: " `T.append` (T.pack $ show x)
 
 mkRoutedMessage :: Node a -> NodeId -> MessagePayload a -> IO (RoutedMessage a)
 mkRoutedMessage node target msg = atomically $ do
@@ -134,6 +160,9 @@ sendResponse node mid msg = do
       atomically $ enqMessage pn $ Response mid msg
 
 handlePeerMessage :: Show a => Node a -> PeerNode a -> Message a -> IO ()
+handlePeerMessage node pn m@(Response mid msg) = do
+  atomically $ writeTChan (nodeIncoming node) (pn, m)
+  logI $ "got a reply: " ++ show m
 handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = do
   -- record routing state
 --  atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rmsg, ri) m
