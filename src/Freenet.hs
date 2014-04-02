@@ -68,16 +68,6 @@ offerChk fn toStore df = do
   -- broadcast arrival
   writeTChan (fnIncomingChk fn) df
 
-handleChkRequest :: Freenet a -> ChkRequest -> IO ()
-handleChkRequest fn dr = do
-  fromStore <- FS.getData (fnChkStore fn) (dataRequestLocation dr)
-  
-  case fromStore of
-    Just df -> atomically $ offerChk fn False df
-    Nothing -> case fnCompanion fn of
-        Nothing -> return ()
-        Just c  -> FC.getChk c dr
-
 waitKeyTimeout :: DataBlock f => TChan f -> Key -> IO (TMVar (Maybe f))
 waitKeyTimeout chan loc = do
   bucket  <- newEmptyTMVarIO
@@ -127,14 +117,17 @@ requestData fn uri = logI ("data request for " ++ show uri) >> let dr = toDataRe
 -- is involved.
 getChk :: Freenet a -> ChkRequest -> IO (Either T.Text ChkBlock)
 getChk fn dr = do
-  let 
-    l = dataRequestLocation dr
-    chan = fnIncomingChk fn
-      
-  bucket <- waitKeyTimeout (chan) l
-  handleChkRequest fn dr
-  md <- atomically $ readTMVar bucket
+  fromStore <- FS.getData (fnChkStore fn) (dataRequestLocation dr)
   
-  return $ case md of
-    Nothing -> Left "requestChk: timeout"
-    Just d  -> Right d
+  case fromStore of
+    Just blk -> return $ Right blk
+    Nothing -> case fnCompanion fn of
+        Nothing -> return $ Left "not in store, no companion"
+        Just c  -> do
+          bucket <- waitKeyTimeout (fnIncomingChk fn) (dataRequestLocation dr)
+          FC.getChk c dr
+          md <- atomically $ readTMVar bucket
+  
+          return $ case md of
+            Nothing -> Left "timeout waiting for companion"
+            Just d  -> Right d
