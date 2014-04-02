@@ -107,6 +107,10 @@ instance DataBlock SskBlock where
   dataBlockLocation (SskBlock k _ _ _) = k
   decryptDataBlock = decryptSskBlock
 
+instance Binary SskBlock where
+  put = storePut
+  get = storeGet
+
 mkSskBlock
   :: Key                      -- ^ location
   -> SskHeader                -- ^ header
@@ -253,7 +257,7 @@ data SskRequest = SskRequest
                   { sskReqPkh      :: ! Key
                   , sskReqEhd      :: ! Key
                   , sskReqAlg      :: ! Word8
-                  }
+                  } deriving ( Show )
                   
 instance Binary SskRequest where
   put (SskRequest pk eh a) = put pk >> put eh >> put a

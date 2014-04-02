@@ -131,18 +131,17 @@ requestSsk n req = do
   local <- FN.getSsk (nodeFreenet n) req
   case local of
     Right blk -> return $ Right blk
-    Left e    -> return $ Left e
-{-      logI $ "could not fetch data locally " ++ show e
-      msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest req)
+    Left e    -> do
+      logI $ "could not fetch data locally " ++ show e
+      msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest req)
       bucket <- waitResponse n $ rmId msg
       sendRoutedMessage n msg
       result <- atomically $ takeTMVar bucket
       case result of
         Nothing   -> return $ Left "timeout waiting for response"
         Just resp -> case resp of
-          (FreenetChkBlock blk) -> return $ Right blk
-          x                     -> return $ Left $ "expected CHK block, but got: " `T.append` (T.pack $ show x)
--}
+          (FreenetSskBlock blk) -> return $ Right blk
+          x                     -> return $ Left $ "expected SSK block, but got: " `T.append` (T.pack $ show x)
 
 mkRoutedMessage :: Node a -> NodeId -> MessagePayload a -> IO (RoutedMessage a)
 mkRoutedMessage node target msg = atomically $ do
@@ -150,12 +149,13 @@ mkRoutedMessage node target msg = atomically $ do
   modifyTVar (nextMsgId node) (+1)
   return $ RoutedMessage msg mid $ NBO.mkRoutingInfo target
 
-sendRoutedMessage :: Node a -> RoutedMessage a -> IO ()
+sendRoutedMessage :: Show a => Node a -> RoutedMessage a -> IO ()
 sendRoutedMessage node msg = do
   result <- atomically $ NBO.route (nodeNbo node) Nothing msg
 
   case result of
     NBO.Forward dest msg -> atomically $ enqMessage dest $ Routed msg
+    NBO.Fail             -> logI $ "message failed fatally: " ++ show msg
 
 sendResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
 sendResponse node mid msg = do

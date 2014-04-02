@@ -12,6 +12,7 @@ import Data.Binary
 import Data.Conduit
 
 import qualified Freenet.Chk as FN
+import qualified Freenet.Ssk as FN
 import qualified NextBestOnce as NBO
 import Types
 
@@ -38,6 +39,8 @@ data MessagePayload a
      | Ping
      | FreenetChkRequest FN.ChkRequest
      | FreenetChkBlock   FN.ChkBlock
+     | FreenetSskRequest FN.SskRequest
+     | FreenetSskBlock   FN.SskBlock
      deriving ( Show )
 
 instance (Binary a) => Binary (MessagePayload a) where
@@ -45,6 +48,8 @@ instance (Binary a) => Binary (MessagePayload a) where
   put Ping                   = putHeader 2
   put (FreenetChkRequest dr) = putHeader 3 >> put dr
   put (FreenetChkBlock blk)  = putHeader 4 >> put blk
+  put (FreenetSskRequest dr) = putHeader 5 >> put dr
+  put (FreenetSskBlock blk)  = putHeader 6 >> put blk
   
   get = do
     t <- getWord8
@@ -54,6 +59,8 @@ instance (Binary a) => Binary (MessagePayload a) where
       2 -> return Ping
       3 -> FreenetChkRequest <$> get
       4 -> FreenetChkBlock <$> get
+      5 -> FreenetSskRequest <$> get
+      6 -> FreenetSskBlock <$> get
       _ -> fail $ "unknown message type " ++ show t
 
 
