@@ -104,7 +104,7 @@ instance StorePersistable SskBlock where
       Left e   -> fail $ T.unpack e
   
 instance DataBlock SskBlock where
-  dataBlockLocation (SskBlock k _ _ _) = k
+  dataBlockLocation (SskBlock _ pk hdr _) = sskLocation' (hashPubKey pk) (mkKey' $ sskHeaderEHDocname hdr)
   decryptDataBlock = decryptSskBlock
 
 instance Binary SskBlock where
@@ -126,7 +126,7 @@ mkSskBlock k h d pk
     overallHash = BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [hashHeader, dataHash]
     dataHash =  BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromStrict d
     hashHeader = BS.take 72 $ unSskHeader h
-    sig = uncurry DSA.Signature $ (sskHeaderRS h)
+    sig = uncurry DSA.Signature $ sskHeaderRS h
 
 decryptSskBlock :: SskBlock -> Key -> Word8 -> Either T.Text BSL.ByteString
 decryptSskBlock (SskBlock _ _ h d) key calg
