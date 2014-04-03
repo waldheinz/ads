@@ -92,7 +92,7 @@ sskDataSize = 1024
 data SskBlock = SskBlock !Key !PubKey !SskHeader !BS.ByteString
 
 instance Show SskBlock where
-  show (SskBlock k _ h d) = "SskFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
+  show (SskBlock k _ h d) = "SskBlock {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
 
 instance StorePersistable SskBlock where
   storeSize = \_ -> 32 + pubKeySize + sskHeaderSize + sskDataSize
@@ -104,7 +104,7 @@ instance StorePersistable SskBlock where
       Left e   -> fail $ T.unpack e
   
 instance DataBlock SskBlock where
-  dataBlockLocation (SskBlock _ pk hdr _) = sskLocation' (hashPubKey pk) (mkKey' $ sskHeaderEHDocname hdr)
+  dataBlockLocation (SskBlock loc _ _ _) = loc -- sskLocation' (hashPubKey pk) (mkKey' $ sskHeaderEHDocname hdr)
   decryptDataBlock = decryptSskBlock
 
 instance Binary SskBlock where
@@ -185,9 +185,10 @@ sskEncryptDocname ckey docname = mkKey' $ RD.encipher rjk dnh where
 -----------------------------------------------------------------------------------------------
 
 putMpi :: Integer -> Put
-putMpi i = putWord16be (fromIntegral $ BS.length bs) >> putByteString bs where
+putMpi i = putWord16be (len * 8 - 8) >> putByteString bs where
   bs = i2bs i
-
+  len = fromIntegral $ BS.length bs
+  
 getMpi :: Get Integer
 getMpi = do
   len <- (\x -> (x + 8) `div` 8) <$> getWord16be
@@ -209,10 +210,11 @@ newtype PubKey = PK { unPublicKey :: DSA.PublicKey } deriving ( Show )
 instance Binary PubKey where
   put = putPk
   get = do
-    grp <- getGroup
-    y   <- getMpi
-    sofar <- bytesRead
-    skip $ pubKeySize - (fromIntegral sofar) 
+    before <- bytesRead
+    grp    <- getGroup
+    y      <- getMpi
+    after  <- bytesRead
+    skip $ pubKeySize - (fromIntegral $ after - before) 
     return $ PK (DSA.PublicKey grp y)
 
 mkPubKey :: BS.ByteString -> Either T.Text PubKey

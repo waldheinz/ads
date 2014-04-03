@@ -60,7 +60,7 @@ mkStoreFile sp fileName count = do
   let 
     getOffsets loc =
       let idx = (fromIntegral $ hash loc :: Word32) `rem` (fromIntegral count)
-      in map (\i -> (fromIntegral i) * (fromIntegral entrySize)) [idx .. idx + 5]
+      in map (\i -> (fromIntegral i `rem` (fromIntegral count)) * (fromIntegral entrySize)) [idx .. idx + 5]
 
     doRead loc bucket = go offsets where
       offsets   = getOffsets loc
@@ -70,7 +70,7 @@ mkStoreFile sp fileName count = do
         d <- BSL.hGet handle entrySize
         
         case runGetOrFail doGet d of
-          Left  (_, _, _)  -> go os
+          Left  (_, _, _ ) -> go os
           Right (_, _, df) -> if loc == dataBlockLocation df
                               then atomically $ putTMVar bucket $ Just df
                               else go os
