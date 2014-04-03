@@ -41,7 +41,16 @@ requestNodeData n (SSK pkh key extra dn _) = do
   return $ case result of
     Left e    -> Left e
     Right blk -> decryptDataBlock blk key $ sskExtraCrypto extra
-  
+
+requestNodeData n (USK pkh key extra dn dr _) = do
+  result <- requestSsk n $ SskRequest pkh (sskEncryptDocname key dn') (sskExtraCrypto extra)
+
+  return $ case result of
+    Left e    -> Left e
+    Right blk -> decryptDataBlock blk key $ sskExtraCrypto extra
+  where
+    dn' = dn `T.append` "-" `T.append` (T.pack $ show dr)
+    
 -- |
 -- Tries to fetch the specified URI, parses metadata if it's
 -- a control document, goes on fetching the referenced data,
