@@ -42,18 +42,34 @@ data URI
        , sskDocName    :: T.Text   -- ^ the document name, which is the mandatory first path element
        , sskPath       :: [T.Text] -- ^ the remainder of the path
        }
+     | USK
+       { uskPubKeyHash :: Key
+       , uskKey        :: Key
+       , uskExtra      :: SskExtra
+       , uskDocName    :: T.Text
+       , uskRevision   :: Integer
+       , uskPath       :: [T.Text]
+       }
 
 instance Show URI where
-  show (CHK l k e p) = "CHK@" ++ show l ++ "," ++ show k ++ "," ++ show e ++ "/" ++ (T.unpack $ T.intercalate "/" p)
-  show (SSK l k e d p) = "SSK@" ++ show l ++ "," ++ show k ++ "," ++ show e ++ "/" ++ T.unpack d ++ "/" ++ (T.unpack $ T.intercalate "/" p)
-
+  show (CHK l k e p)     =
+    "CHK@" ++ show l ++ "," ++ show k ++ "," ++ show e ++ "/" ++ (T.unpack $ T.intercalate "/" p)
+    
+  show (SSK l k e d p)   =
+    "SSK@" ++ show l ++ "," ++ show k ++ "," ++ show e ++ "/" ++ T.unpack d ++ "/" ++ (T.unpack $ T.intercalate "/" p)
+    
+  show (USK l k e d r p) =
+    "USK@" ++ show l ++ "," ++ show k ++ "," ++ show e ++ "/" ++ T.unpack d ++ "/" ++ show r ++ "/" ++ (T.unpack $ T.intercalate "/" p)
+  
 uriCryptoKey :: URI -> Key
-uriCryptoKey (CHK _ k _ _)   = k
-uriCryptoKey (SSK _ k _ _ _) = k
+uriCryptoKey (CHK _ k _ _)     = k
+uriCryptoKey (SSK _ k _ _ _)   = k
+uriCryptoKey (USK _ k _ _ _ _) = k
 
 appendUriPath :: URI -> [T.Text] -> URI
 appendUriPath uri@(CHK {}) p = uri { chkPath = p }
 appendUriPath uri@(SSK {}) p = uri { sskPath = p }
+appendUriPath uri@(USK {}) p = uri { uskPath = p }
 
 -- |
 -- this should be compatible with Java's DataOutput.writeUTF(..)
@@ -72,10 +88,10 @@ instance Binary URI where
     t <- getWord8
     
     case t of
-      1 -> do -- CHK
+      1 -> do     -- CHK
         fail "get CHK"
         
-      2 -> do -- SSK
+      2 -> do     -- SSK
         rk <- get
         ck <- get
         ex <- get
@@ -83,14 +99,42 @@ instance Binary URI where
         mc <- getWord32be
         ps <- replicateM (fromIntegral mc) $ getUTF8
         return $ SSK rk ck ex dn ps
-
+        
+      3 -> do     -- USK
+        fail "get USK"
+        
       x -> fail $ "unknown URI type " ++ show x
       
 parseUri :: T.Text -> Either T.Text URI
 parseUri str = case T.take 4 str of
   "CHK@" -> parseChk (T.drop 4 str)
   "SSK@" -> parseSsk (T.drop 4 str)
+  "USK@" -> parseUsk (T.drop 4 str)
   _      -> Left $ T.concat ["cannot recognize URI type of \"", str, "\""]
+
+parseUsk :: T.Text -> Either T.Text URI
+parseUsk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') str' of
+  [rstr, cstr, estr] -> do
+    rk <- fromBase64' rstr >>= mkKey
+    ck <- fromBase64' cstr >>= mkKey
+    e  <- fromBase64' estr >>= \eb -> if BS.length eb == 5
+                                      then Right $ eb
+                                      else Left "USK extra data must be 5 bytes"
+    let
+      path' = T.drop 1 path
+      ps = if T.null path' then [] else  T.split (== '/') path'
+
+    -- for SSKs, the first path element is the docname and mandatory
+    if length ps < 2
+      then Left "missing USK document name / revision"
+      else let
+             [docname, revstr] = take 2 ps
+             rs = reads $ T.unpack revstr
+           in if null rs
+              then Left  $ "can't parse USK revision"
+              else Right $ USK rk ck (SskExtra e) docname (fst $ head rs) (drop 2 ps)
+                   
+  _ -> Left $ T.concat $ ["expected 3 comma-separated parts in \"", str, "\""]
 
 parseSsk :: T.Text -> Either T.Text URI
 parseSsk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') str' of
@@ -99,7 +143,7 @@ parseSsk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') s
     ck <- fromBase64' cstr >>= mkKey
     e  <- fromBase64' estr >>= \eb -> if BS.length eb == 5
                                       then Right $ eb
-                                      else Left "CHK extra data must be 5 bytes"
+                                      else Left "SSK extra data must be 5 bytes"
     let
       path' = T.drop 1 path
       ps = if T.null path' then [] else  T.split (== '/') path'
@@ -132,12 +176,14 @@ parseChk str = let (str', path) = T.span (/= '/') str in case T.split (== ',') s
 -- provide information how to assemble the original data referenced
 -- by the URI and specify an MIME type.
 isControlDocument :: URI -> Bool
-isControlDocument (CHK _ _ e _)   = chkExtraIsControl e
-isControlDocument (SSK _ _ _ _ _) = True -- to my knowledge, this is always true
+isControlDocument (CHK _ _ e _) = chkExtraIsControl e
+isControlDocument (SSK {})      = True -- to my knowledge, this is always true
+isControlDocument (USK {})      = True -- this one, too
 
 uriPath :: URI -> [T.Text]
-uriPath (CHK _ _ _ p)   = p
-uriPath (SSK _ _ _ _ p) = p
+uriPath (CHK _ _ _ p)     = p
+uriPath (SSK _ _ _ _ p)   = p
+uriPath (USK _ _ _ _ _ p) = p
 
 --------------------------------------------------------------------------------------
 -- CHK extra data (last URI component)
