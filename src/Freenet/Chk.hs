@@ -3,7 +3,7 @@
 
 module Freenet.Chk (
   -- * Working with CHKs
-  ChkRequest(..), ChkBlock(..), mkChkBlock,
+  ChkRequest(..), ChkBlock(..), mkChkBlock, decompressChk,
 
   -- * CHK Headers
   ChkHeader, mkChkHeader, unChkHeader, chkHeaderHashId,
@@ -22,6 +22,7 @@ import Data.Digest.Pure.SHA
 import qualified Data.Text as T
 
 import Freenet.Base64
+import Freenet.Compression
 import Freenet.Pcfb
 import qualified Freenet.Rijndael as RD
 import Freenet.Store
@@ -90,7 +91,7 @@ instance StorePersistable ChkBlock where
   storeSize = \_ -> 32 + chkHeaderSize + chkDataSize
   storePut  = \(ChkBlock k h d) -> put k >> put h >> putByteString d
   storeGet  = do
-    (k, h, d) <- (,,) <$> get <*> get <*> getByteString 32768
+    (k, h, d) <- (,,) <$> get <*> get <*> getByteString chkDataSize
     case mkChkBlock k h d of
       Right df -> return df
       Left e   -> fail $ T.unpack e
@@ -171,3 +172,8 @@ instance Binary ChkRequest where
 
 instance DataRequest ChkRequest where
   dataRequestLocation = chkReqLocation
+
+decompressChk :: CompressionCodec -> BSL.ByteString -> IO (Either T.Text BSL.ByteString)
+decompressChk codec inp
+  | codec == None = return $ Right inp
+  | otherwise     = decompress codec $ BSL.drop 4 inp

@@ -29,11 +29,16 @@ logI m = infoM "freenet.fetch" m
 
 requestNodeData :: (Show a) => Node a -> URI -> IO (Either T.Text BSL.ByteString)
 requestNodeData n (CHK loc key extra _) = do
-  result <- requestChk n $ ChkRequest loc (chkExtraCrypto extra)
-
-  return $ case result of
-    Left e    -> Left e
-    Right blk -> decryptDataBlock blk key $ chkExtraCrypto extra
+  case chkExtraCompression extra of
+    Left  e -> return $ Left $ "can't decompress CHK: " `T.append` e
+    Right c -> do
+      result <- requestChk n $ ChkRequest loc (chkExtraCrypto extra)
+  
+      case result of
+        Left e    -> return $ Left $ "obtaining CHK data block failed: " `T.append` e
+        Right blk -> case decryptDataBlock blk key $ chkExtraCrypto extra of
+          Left e  -> return $ Left $ "decrypting CHK data block failed: " `T.append` e
+          Right p -> decompressChk c p
 
 requestNodeData n (SSK pkh key extra dn _) = do
   result <- requestSsk n $ SskRequest pkh (sskEncryptDocname key dn) (sskExtraCrypto extra)
@@ -65,10 +70,11 @@ fetchUri fn uri = do
     Left e  -> return $ Left e
     Right plaintext -> if isControlDocument uri
                        then do
+                         print "fetchUri: metadata"
                          case parseMetadata plaintext of
                            Left e   -> return $ Left e
                            Right md -> resolvePath fn (uriPath uri) Nothing (Just md)
-                       else return $ Right plaintext
+                       else print "fetchUri: direct" >> (return $ Right plaintext)
 
 fetchUris :: Show a => Node a -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
 fetchUris fn uris = do
@@ -76,11 +82,17 @@ fetchUris fn uris = do
   return $ zip uris result
 
 fetchRedirect :: Show a => Node a -> RedirectTarget -> [T.Text] -> IO (Either T.Text BSL.ByteString)
-fetchRedirect fn (RedirectKey _ uri) path = fetchUri fn $ appendUriPath uri path
---                                            if isControlDocument uri
---                                            then fetchUri fn $ appendUriPath uri path
---                                            else requestData fn uri
+fetchRedirect fn (RedirectKey _ uri) path = do
+  logI $ "fetch redirect to " ++ show uri ++ " with path " ++ show path
+--   requestNodeData fn uri
+  fetchUri fn $ appendUriPath uri path
+  if isControlDocument uri
+  then fetchUri fn $ appendUriPath uri path
+  else requestNodeData fn uri
+  
 fetchRedirect fn (SplitFile comp dlen olen segs _) _ = do -- TODO: we're not returning the MIME
+  logI $ "fetch split file"
+  
   let
     -- TODO: use FEC check blocks as well
     segUris = catMaybes $ map (\(SplitFileSegment uri isd) -> if isd then Just uri else Nothing) segs
@@ -95,12 +107,23 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) _ = do -- TODO: we're not ret
     then return $ Left $ T.intercalate ", " es
     else decompress comp $ BSL.take (fromIntegral dlen) $ BSL.concat bs
 
+fetchRedirect' :: Show a => Node a -> RedirectTarget -> [T.Text] -> IO (Either T.Text BSL.ByteString)
+fetchRedirect' fn (RedirectKey _ uri) path = do
+  logI $ "fetch redirect' to " ++ show uri ++ " with path " ++ show path
+--  requestNodeData fn uri
+  fetchUri fn uri -- $ appendUriPath uri path
+--  if not $ isControlDocument uri
+--  then fetchUri fn $ appendUriPath uri path
+--  else requestNodeData fn uri
+fetchRedirect' fn sf@(SplitFile _ _ _ _ _) path = fetchRedirect fn sf path
+
 type Archive = Map.Map String BSL.ByteString
 
 fetchArchive :: Show a => Node a -> RedirectTarget -> ArchiveManifestType -> IO (Either T.Text Archive)
 fetchArchive fn tgt tp = do
   logI $ "fetching archive"
-  arch <- fetchRedirect fn tgt []
+  arch <- fetchRedirect' fn tgt []
+  
   case arch of
     Left e   -> return $ Left e
     Right bs -> case tp of
@@ -110,8 +133,6 @@ fetchArchive fn tgt tp = do
                  _                    -> m
              ) Map.empty (const Map.empty) $ TAR.read bs
       x   -> return $ Left $ T.pack $ "unsupported archive type " ++ show x
-
-
       
 -- | FIXME: watch out for infinite redirects
 resolvePath
@@ -153,10 +174,12 @@ resolvePath fn (p:ps) a md@(Just (Manifest me)) = do
       x                     -> resolvePath fn ps    a  (Just x)
                              -- return $ Left $ T.concat ["can not resolve ", T.pack $ show x, " against a manifest"]
 
-resolvePath fn ps Nothing (Just (ArchiveManifest (RedirectKey _ uri) atype _ _)) = do
+resolvePath fn ps Nothing (Just (ArchiveManifest tgt@(RedirectKey _ uri) atype _ _)) = do
   logI $ "looking up archive at " ++ (show uri) ++ " for " ++ show ps
---  arch <- fetchArchive fn uri
-  fetchUri fn $ appendUriPath uri ps
+  arch <- fetchArchive fn tgt atype
+  case arch of
+    Left e -> return $ Left $ "resolvePath (archive manifest): " `T.append` e
+    Right a -> resolvePath fn ps (Just a) Nothing
   
 resolvePath fn ps Nothing (Just (ArchiveManifest atgt atype _ _)) = do
   logI $ "resolving archive manifest " ++ show atgt

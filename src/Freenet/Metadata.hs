@@ -135,7 +135,6 @@ getSplitFileSegment common isData =
       e <- get
       (l, c) <- liftM2 (,) get get
       return $! SplitFileSegment (CHK l c e []) isData
---      fail "only shared crypto infos allowed for now"
 
 data RedirectTarget
   = SplitFile

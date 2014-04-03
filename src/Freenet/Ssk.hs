@@ -4,6 +4,7 @@
 module Freenet.Ssk (
   SskRequest(..), SskBlock(..), mkSskBlock,
   sskLocation, sskLocation', sskEncryptDocname,
+  decompressSsk,
   
   -- * SSK Headers
   SskHeader, mkSskHeader, sskDataSize, sskHeaderSize,
@@ -28,6 +29,7 @@ import qualified Crypto.PubKey.DSA as DSA
 import Data.Binary.Put
 
 import Freenet.Base64
+import Freenet.Compression
 import Freenet.Pcfb
 import qualified Freenet.Rijndael as RD
 import Freenet.Types
@@ -268,3 +270,5 @@ instance Binary SskRequest where
 instance DataRequest SskRequest where
   dataRequestLocation (SskRequest pkh ehd _) = sskLocation' pkh ehd
   
+decompressSsk :: CompressionCodec -> BSL.ByteString -> IO (Either T.Text BSL.ByteString)
+decompressSsk codec inp = decompress codec $ BSL.drop 2 inp

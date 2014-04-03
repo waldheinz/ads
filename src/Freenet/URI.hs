@@ -7,7 +7,7 @@ module Freenet.URI (
   appendUriPath,
 
   -- * CHKs
-  ChkExtra, mkChkExtra, chkExtraCrypto,
+  ChkExtra, mkChkExtra, chkExtraCrypto, chkExtraCompression,
 
   -- * SSKs
   sskExtraCrypto
@@ -26,6 +26,7 @@ import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8' )
 
 import Freenet.Base64
+import Freenet.Compression
 import Freenet.Types  
 
 data URI
@@ -67,9 +68,9 @@ uriCryptoKey (SSK _ k _ _ _)   = k
 uriCryptoKey (USK _ k _ _ _ _) = k
 
 appendUriPath :: URI -> [T.Text] -> URI
-appendUriPath uri@(CHK {}) p = uri { chkPath = p }
-appendUriPath uri@(SSK {}) p = uri { sskPath = p }
-appendUriPath uri@(USK {}) p = uri { uskPath = p }
+appendUriPath uri@(CHK {}) p = uri { chkPath = (chkPath uri) ++ p }
+appendUriPath uri@(SSK {}) p = uri { sskPath = (sskPath uri) ++ p }
+appendUriPath uri@(USK {}) p = uri { uskPath = (uskPath uri) ++ p }
 
 -- |
 -- this should be compatible with Java's DataOutput.writeUTF(..)
@@ -216,6 +217,18 @@ chkExtraCrypto ce = BS.index (unChkExtra ce) 1
 chkExtraIsControl :: ChkExtra -> Bool
 chkExtraIsControl ce = 2 == BS.index (unChkExtra ce) 2
 
+chkExtraCompression :: ChkExtra -> Either T.Text CompressionCodec
+chkExtraCompression ce
+  | c > 0x8000 = Right None
+  | otherwise = case c of
+    0 -> Right Gzip
+    1 -> Right Bzip2
+    2 -> Right LZMA
+    3 -> Right LZMA_NEW
+    x -> Left $ "unknown CHK compression codec: " `T.append` (T.pack $ show x)
+  where
+    c = decode $ BSL.fromStrict $ BS.drop 3 $ unChkExtra ce :: Word16
+    
 ---------------------------------------------------------------------------
 -- SSK specifics
 ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ module Freenet.Types (
   DataRequest(..), DataBlock(..), StorePersistable(..)
   ) where
 
-import Control.Applicative ( (<$>), (<*>) )
+import Control.Applicative ( (<$>) )
 import Data.Binary
 import Data.Binary.Put
 import Data.Binary.Get
@@ -46,6 +46,9 @@ mkKey' bs
 -- A still encrypted, but verified, chunk of data.
 class DataBlock f where
   dataBlockLocation :: f -> Key
+  
+  -- |
+  -- Decrypts the data block. Be aware that the resulting data may still be compressed.
   decryptDataBlock
     :: f      
     -> Key                          -- ^ the secret key

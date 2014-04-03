@@ -115,7 +115,7 @@ requestChk n req = do
   case local of
     Right blk -> return $ Right blk
     Left e    -> do
-      logI $ "could not fetch data locally " ++ show e
+--      logI $ "could not fetch data locally " ++ show e
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest req)
       bucket <- waitResponse n $ rmId msg
       sendRoutedMessage n msg
@@ -132,7 +132,7 @@ requestSsk n req = do
   case local of
     Right blk -> return $ Right blk
     Left e    -> do
-      logI $ "could not fetch data locally " ++ show e
+--      logI $ "could not fetch data locally " ++ show e
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest req)
       bucket <- waitResponse n $ rmId msg
       sendRoutedMessage n msg
@@ -173,7 +173,7 @@ sendResponse node mid msg = do
 handlePeerMessage :: Show a => Node a -> PeerNode a -> Message a -> IO ()
 handlePeerMessage node pn m@(Response mid msg) = do
   atomically $ writeTChan (nodeIncoming node) (pn, m)
-  logI $ "got a reply: " ++ show m
+--  logI $ "got a reply: " ++ show m
 handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = do
   -- record routing state
 --  atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rmsg, ri) m
@@ -238,9 +238,7 @@ removePeer p n = do
 maintainConnections :: (Show a) => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
   -- we simply try to maintain a connection to all known peers for now
-
-  -- one connection attempt every 10 seconds
-  delay <- registerDelay $ 10 * 1000 * 1000
+  delay <- registerDelay $ 2 * 1000 * 1000 -- limit outgoing connection rate
   
   let
     peers = nodePeers node
