@@ -29,6 +29,8 @@ import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8' )
 
+import Debug.Trace
+
 import Freenet.Compression
 import Freenet.Mime
 import Freenet.Types
@@ -186,28 +188,36 @@ getSplitFile v flags mkey cryptoAlgo = do
       paramsLen <- getWord32be
       when (paramsLen > 32768) $ fail ("too much splitfile parameter data: " ++ show paramsLen)
       when (v == V1 && paramsLen /= 10) $ fail ("need 10 splitfile param bytes for version 1, got " ++ show paramsLen)
-      when (v == V0 && paramsLen /= 8) $ fail ("need 8 splitfile param bytes for version 0, got " ++ show paramsLen)
+      when (v == V0 && paramsLen < 8) $ fail ("need >=8 splitfile param bytes for version 0, got " ++ show paramsLen)
       
-      (blocksPerSegment, checkBlocks) <- case v of
-        V0 -> liftM2 (,) getWord32be getWord32be
+      (blocksPerSegment, checkBlocks, crossCheckBlocks) <- case v of
+        V0 -> do
+          p1 <- bytesRead
+          (bps, cbs) <- liftM2 (,) getWord32be getWord32be
+          p2 <- bytesRead
+          skip $ (fromIntegral paramsLen) - (fromIntegral $ p2 - p1)
+          return (bps, cbs, 0)
         V1 -> getWord16be >>= \t -> case t of
           0 -> do  -- SPLITFILE_PARAMS_SIMPLE_SEGMENT
-            liftM2 (,) getWord32be getWord32be
+            (bps, cbs) <- liftM2 (,) getWord32be getWord32be
+            return (bps, cbs, 0)
           x  -> fail $ "unknown splitfile params type " ++ show x
         
       splitfileBlocks <- getWord32be
       splitfileCheckBlocks <- getWord32be
       
       let
-        segmentCount = (splitfileBlocks + blocksPerSegment - 1) `div` blocksPerSegment
+        
+        segmentCount = traceShow (splitfileBlocks,blocksPerSegment, crossCheckBlocks ) $
+                       (splitfileBlocks + blocksPerSegment + crossCheckBlocks - 1) `div` (blocksPerSegment + crossCheckBlocks)
         gsfsParams = mkey >>= \k -> Just (k, cryptoAlgo)
 
       when (segmentCount /= 1) $ fail "only single-segment splitfiles for now"
 
       dataBlocks  <- replicateM (fromIntegral splitfileBlocks)      $ getSplitFileSegment gsfsParams True
-      checkBlocks <- replicateM (fromIntegral splitfileCheckBlocks) $ getSplitFileSegment gsfsParams False
+      checkBlocks' <- replicateM (fromIntegral splitfileCheckBlocks) $ getSplitFileSegment gsfsParams False
       
-      return $! SplitFile ccodec dlen olen (dataBlocks ++ checkBlocks) mime
+      return $! SplitFile ccodec dlen olen (dataBlocks ++ checkBlocks') mime
       
     x -> fail $ "unknown splitfile algo " ++ show x
 

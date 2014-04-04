@@ -90,7 +90,12 @@ instance Binary URI where
     
     case t of
       1 -> do     -- CHK
-        fail "get CHK"
+        rk <- get
+        ck <- get
+        ex <- get
+        mc <- getWord32be
+        ps <- replicateM (fromIntegral mc) $ getUTF8
+        return $ CHK rk ck ex ps
         
       2 -> do     -- SSK
         rk <- get
@@ -100,9 +105,6 @@ instance Binary URI where
         mc <- getWord32be
         ps <- replicateM (fromIntegral mc) $ getUTF8
         return $ SSK rk ck ex dn ps
-        
-      3 -> do     -- USK
-        fail "get USK"
         
       x -> fail $ "unknown URI type " ++ show x
       
