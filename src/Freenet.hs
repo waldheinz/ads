@@ -52,15 +52,15 @@ initFn cfg = do
       comp <- FC.initCompanion ccfg (offerChk fn True) (offerSsk fn True)
       return $ fn { fnCompanion = Just comp }
 
-offerSsk :: Freenet a -> Bool -> SskBlock -> STM ()
+offerSsk :: Freenet a -> Bool -> SskBlock -> IO ()
 offerSsk fn toStore df = do
   when toStore $ FS.putData (fnSskStore fn) df
-  writeTChan (fnIncomingSsk fn) df
+  atomically $ writeTChan (fnIncomingSsk fn) df
 
-offerChk :: Freenet a -> Bool -> ChkBlock -> STM ()
+offerChk :: Freenet a -> Bool -> ChkBlock -> IO ()
 offerChk fn toStore df = do
   when toStore $ FS.putData (fnChkStore fn) df
-  writeTChan (fnIncomingChk fn) df
+  atomically $ writeTChan (fnIncomingChk fn) df
 
 waitKeyTimeout :: DataBlock f => TChan f -> Key -> IO (TMVar (Maybe f))
 waitKeyTimeout chan loc = do

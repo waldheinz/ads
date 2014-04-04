@@ -113,7 +113,7 @@ requestChk :: (Show a) => Node a -> FN.ChkRequest -> IO (Either T.Text FN.ChkBlo
 requestChk n req = do
   tid <- myThreadId
   print ("fn", tid, req)
-  local <- return $ Left "xx" -- FN.getChk (nodeFreenet n) req
+  local <- FN.getChk (nodeFreenet n) req
   case local of
     Right blk -> return $ Right blk
     Left e    -> do
@@ -136,7 +136,7 @@ requestSsk :: (Show a) => Node a -> FN.SskRequest -> IO (Either T.Text FN.SskBlo
 requestSsk n req = do
   tid <- myThreadId
   print ("sskfn", tid, req)
-  local <- return $ Left "xxssk" -- FN.getSsk (nodeFreenet n) req
+  local <- FN.getSsk (nodeFreenet n) req
   case local of
     Right blk -> return $ Right blk
     Left e    -> do
@@ -315,8 +315,7 @@ enqMessage n m = writeTBMQueue (nQueue n) m
 runPeerNode
   :: (Show a)
   => Node a
-  -> MessageIO a -- ^ the (source, sink) pair to talk to the peer
---  -> Bool        -- ^ if this is an outbound connection
+  -> MessageIO a    -- ^ the (source, sink) pair to talk to the peer
   -> Maybe (Peer a)
   -> IO ()
 runPeerNode node (src, sink) expected = do

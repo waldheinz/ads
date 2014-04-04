@@ -8,9 +8,7 @@ module Freenet.Store (
   StorePersistable(..)
   ) where
 
-import Control.Concurrent ( forkIO, ThreadId )
-import Control.Concurrent.STM
-import Control.Monad ( forever )
+import qualified Control.Concurrent.Lock as Lock
 import Data.Binary
 import Data.Binary.Get ( runGetOrFail )
 import Data.Binary.Put ( runPut )
@@ -25,14 +23,11 @@ import Freenet.Types
 -- store types
 ----------------------------------------------------------------
 
-data StoreRequest f
-     = ReadRequest Key (TMVar (Maybe f)) -- ^ the request and where to put the data when found
-     | WriteRequest f                    -- ^ the data to put in the store
-
 data StoreFile f = StoreFile
-                     { _sfThread :: ! ThreadId
-                     , sfReqs    :: ! (TBQueue (StoreRequest f))
-                     , _sfHandle :: ! Handle
+                     { sfLock       :: ! Lock.Lock -- ^ for accessing the handle
+                     , sfHandle     :: ! Handle
+                     , sfEntrySize  :: ! Int
+                     , sfEntryCount :: ! Int
                      }
 
 logI :: String -> IO ()
@@ -40,44 +35,33 @@ logI m = infoM "freenet.store" m
   
 mkStoreFile :: StorePersistable f => f -> FilePath -> Int -> IO (StoreFile f)
 mkStoreFile sp fileName count = do
-  rq <- newTBQueueIO 10
   
   let
     entrySize = 1 + storeSize sp
-    doGet = do
-      flags <- getWord8
-      if flags == 1
-        then storeGet
-        else fail "empty slot"
-    doPut df    = putWord8 1 >> storePut df
-    isFree = getWord8 >>= (\flags -> return $ flags == 0)
-
     fileSize  = count * (fromIntegral entrySize)
   
   handle <- openBinaryFile fileName ReadWriteMode
   hSetFileSize handle $ fromIntegral fileSize
+    
+  lck <- Lock.new
+  return $ StoreFile lck handle entrySize count
 
-  let 
-    getOffsets loc =
-      let idx = (fromIntegral $ hash loc :: Word32) `rem` (fromIntegral count)
-      in map (\i -> (fromIntegral i `rem` (fromIntegral count)) * (fromIntegral entrySize)) [idx .. idx + 5]
+locOffsets :: StoreFile f -> Key -> [Integer]
+locOffsets sf loc = map (\i -> (fromIntegral i `rem` (fromIntegral count)) * (fromIntegral entrySize)) [idx .. idx + 5]
+  where
+    idx = (fromIntegral $ hash loc :: Word32) `rem` (fromIntegral count)
+    count = sfEntryCount sf
+    entrySize = sfEntrySize sf
+    
+putData :: StorePersistable f => StoreFile f -> f -> IO ()
+putData sf df = Lock.with (sfLock sf) $ doWrite where
+  handle = sfHandle sf
+  doPut  = putWord8 1 >> storePut df
+  isFree = getWord8 >>= (\flags -> return $ flags == 0)
 
-    doRead loc bucket = go offsets where
-      offsets   = getOffsets loc
-      go []     = atomically $ putTMVar bucket Nothing -- no offsets left, terminate
-      go (o:os) = do
-        hSeek handle AbsoluteSeek o
-        d <- BSL.hGet handle entrySize
-        
-        case runGetOrFail doGet d of
-          Left  (_, _, _ ) -> go os
-          Right (_, _, df) -> if loc == dataBlockLocation df
-                              then atomically $ putTMVar bucket $ Just df
-                              else go os
-          
-    doWrite df = go offsets where
+  doWrite = go offsets where
       loc       = dataBlockLocation df
-      offsets   = getOffsets loc
+      offsets   = locOffsets sf loc
       go []     = logI "no free slots in store"
       go (o:os) = do
         hSeek handle AbsoluteSeek o
@@ -87,25 +71,31 @@ mkStoreFile sp fileName count = do
             if free
               then do
                 hSeek handle AbsoluteSeek o
-                BSL.hPut handle $ runPut $ doPut df
+                BSL.hPut handle $ runPut doPut
                 print $ "written at " ++ show o
               else go os
           Left (_, _, e) -> error e
   
-  tid <- forkIO $ forever $ do
-    req <- atomically $ readTBQueue rq
+
+getData :: StorePersistable f => StoreFile f -> Key -> IO (Maybe f)
+getData fs key = Lock.with (sfLock fs) $ doRead key where
+  handle = sfHandle fs
+  doGet = do
+    flags <- getWord8
+    if flags == 1
+      then storeGet
+      else fail "empty slot"
+
+  doRead loc = go offsets where
+    offsets   = locOffsets fs loc
+    go []     = return $ Nothing -- no offsets left, terminate
+    go (o:os) = do
+      hSeek handle AbsoluteSeek o
+      d <- BSL.hGet handle $ sfEntrySize fs
+        
+      case runGetOrFail doGet d of
+        Left  (_, _, _ ) -> go os
+        Right (_, _, df) -> if loc == dataBlockLocation df
+                            then return $ Just df
+                            else go os
     
-    case req of
-      ReadRequest dr bucket -> doRead dr bucket
-      WriteRequest df       -> doWrite df
-
-  return $ StoreFile tid rq handle
-  
-putData :: DataBlock f => StoreFile f -> f -> STM ()
-putData sf df = writeTBQueue (sfReqs sf) (WriteRequest df)
-
-getData :: DataBlock f => StoreFile f -> Key -> IO (Maybe f)
-getData fs key = do
-  bucket <- newEmptyTMVarIO
-  atomically $ writeTBQueue (sfReqs fs) (ReadRequest key bucket)
-  atomically $ takeTMVar bucket

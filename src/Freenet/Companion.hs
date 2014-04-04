@@ -9,7 +9,7 @@ module Freenet.Companion (
 
 import Control.Applicative ( (<$>) )
 import Control.Concurrent ( forkIO )
-import Control.Concurrent.STM
+import qualified Control.Concurrent.Lock as Lock
 import Control.Monad ( forever, void )
 import qualified Data.ByteString as BS
 import qualified Data.Configurator as CFG
@@ -26,9 +26,10 @@ import Freenet.Types
 
 data Companion = Companion
                  { cHandle :: Handle
+                 , cLock   :: Lock.Lock
                  }
 
-initCompanion :: CFG.Config -> (ChkBlock -> STM ()) -> (SskBlock -> STM ()) -> IO Companion
+initCompanion :: CFG.Config -> (ChkBlock -> IO ()) -> (SskBlock -> IO ()) -> IO Companion
 initCompanion cfg chkHandler sskHandler = do
   host <- CFG.require cfg "host"
   port <- CFG.require cfg "port" :: IO Int
@@ -57,7 +58,7 @@ initCompanion cfg chkHandler sskHandler = do
 
         case df of
           Left e  -> putStrLn $ "could not parse CHK found response: " ++ T.unpack e
-          Right d -> atomically $ chkHandler d
+          Right d -> chkHandler d
 
       "ssk" -> do
         let 
@@ -73,18 +74,19 @@ initCompanion cfg chkHandler sskHandler = do
 
         case df of
           Left e  -> putStrLn $ "could not parse SSK found response: " ++ T.unpack e
-          Right d -> atomically $ sskHandler d
+          Right d -> sskHandler d
           
       x -> print $ "strange companion response " ++ T.unpack x
-  
-  return $ Companion handle
+
+  lck <- Lock.new
+  return $ Companion handle lck
 
 getChk :: Companion -> ChkRequest -> IO ()
 getChk comp (ChkRequest k a) =
   let msg = T.intercalate " " ["getchk", toBase64' $ unKey k, T.pack $ show a, "\n"]
-  in BS.hPut (cHandle comp) $ encodeUtf8 msg
+  in Lock.with (cLock comp) $ BS.hPut (cHandle comp) $ encodeUtf8 msg
 
 getSsk :: Companion -> SskRequest -> IO ()
-getSsk comp (SskRequest hpk ehd e) = BS.hPut (cHandle comp) $ encodeUtf8 msg where
+getSsk comp (SskRequest hpk ehd e) = Lock.with (cLock comp) $ BS.hPut (cHandle comp) $ encodeUtf8 msg where
   msg = T.intercalate " " ["getssk", k $ hpk, k ehd, T.pack $ show e, "\n"]
   k = toBase64' . unKey

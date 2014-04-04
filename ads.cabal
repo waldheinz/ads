@@ -31,6 +31,7 @@ executable ads
     binary-conduit       >= 1.2,
     bytestring           >= 0.10,
     cipher-aes           >= 0.2,
+    concurrent-extra     >= 0.7,
     conduit              >= 1.0,
     configurator         >= 0.2,
     containers           >= 0.5,
