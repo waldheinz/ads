@@ -91,7 +91,7 @@ waitResponse node mid = do
   let
     doWait = orElse
       (readTChan chan   >>= checkResponse)
-      (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else doWait)
+      (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
     
     checkResponse msg = case msg of
       (_, (Response mid' rp)) -> if mid == mid' then (putTMVar bucket $ Just rp) else doWait
@@ -99,11 +99,6 @@ waitResponse node mid = do
 
   -- wait for data or timeout
   void $ forkIO $ atomically $ doWait
-
---    forever $ orElse
---    (readTChan chan   >>= checkResponse)
---    (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
-
   return bucket
 
 -- |
@@ -117,20 +112,14 @@ keyToTarget key = mkNodeId' $ FN.unKey key
 -- peer nodes.
 requestChk :: (Show a) => Node a -> FN.ChkRequest -> IO (Either T.Text FN.ChkBlock)
 requestChk n req = do
-  tid <- myThreadId
-  print ("fn", tid, req)
   local <- FN.getChk (nodeFreenet n) req
   case local of
     Right blk -> return $ Right blk
     Left e    -> do
-      logI $ "could not fetch data locally " ++ show e
-      print ("-> mkr", tid)
+--      logI $ "could not fetch data locally " ++ show e
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest req)
-      print ("-> wr", tid)
       bucket <- waitResponse n $ rmId msg
-      print ("-> srm", tid)
       sendRoutedMessage n msg
-      print ("-> take", tid)
       result <- atomically $ takeTMVar bucket
       case result of
         Nothing   -> return $ Left "timeout waiting for response"
@@ -140,20 +129,14 @@ requestChk n req = do
 
 requestSsk :: (Show a) => Node a -> FN.SskRequest -> IO (Either T.Text FN.SskBlock)
 requestSsk n req = do
-  tid <- myThreadId
-  print ("sskfn", tid, req)
   local <- FN.getSsk (nodeFreenet n) req
   case local of
     Right blk -> return $ Right blk
     Left e    -> do
 --      logI $ "could not fetch data locally " ++ show e
-      print ("-> sskmkr", tid)
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest req)
-      print ("-> sskwr", tid)
       bucket <- waitResponse n $ rmId msg
-      print ("-> ssksrm", tid)
       sendRoutedMessage n msg
-      print ("-> ssktake", tid)
       result <- atomically $ takeTMVar bucket
       case result of
         Nothing   -> return $ Left "timeout waiting for response"
@@ -172,7 +155,7 @@ sendRoutedMessage node msg = myThreadId >>= \tid -> do
   mlog <- atomically $ do
     result <- NBO.route (nodeNbo node) Nothing msg
     case result of
-      NBO.Forward dest msg -> enqMessage dest (Routed msg) >> (return $ Just $ print ("forwarded", tid))
+      NBO.Forward dest msg -> enqMessage dest (Routed msg) >> return Nothing
       NBO.Fail             -> return $ Just $ logI $ "message failed fatally: " ++ show msg
 
   case mlog of
@@ -351,7 +334,7 @@ runPeerNode node (src, sink) expected = do
           (\_ -> do
               logI $ "lost connection to " ++ (show $ peerNodeInfo $ nodePeer pn)
               atomically $ removePeer (nodePeers node) pn)
-          (C.mapM_ $ \msg -> print ("incoming", msg) >> handlePeerMessage node pn msg)
+          (C.mapM_ $ handlePeerMessage node pn)
         
       x       -> error $ show x
         

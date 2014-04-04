@@ -71,7 +71,7 @@ waitKeyTimeout chan loc = do
   let
     doWait = orElse
       (readTChan chan' >>= \cf -> if dataBlockLocation cf == loc then putTMVar bucket (Just cf) else doWait)
-      (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else doWait)
+      (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
 
   
   -- wait for data or timeout

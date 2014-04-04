@@ -14,7 +14,7 @@ cabal-version:       >=1.10
 
 executable ads
   main-is:             Main.hs
-  ghc-options:         -Wall -threaded
+  ghc-options:         -Wall -O2 -threaded
   -- -debug
   c-sources:
     cbits/rijndael.c,
