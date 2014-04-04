@@ -29,8 +29,6 @@ import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8' )
 
-import Debug.Trace
-
 import Freenet.Compression
 import Freenet.Mime
 import Freenet.Types
@@ -207,9 +205,7 @@ getSplitFile v flags mkey cryptoAlgo = do
       splitfileCheckBlocks <- getWord32be
       
       let
-        
-        segmentCount = traceShow (splitfileBlocks,blocksPerSegment, crossCheckBlocks ) $
-                       (splitfileBlocks + blocksPerSegment + crossCheckBlocks - 1) `div` (blocksPerSegment + crossCheckBlocks)
+        segmentCount = (splitfileBlocks + blocksPerSegment + crossCheckBlocks - 1) `div` (blocksPerSegment + crossCheckBlocks)
         gsfsParams = mkey >>= \k -> Just (k, cryptoAlgo)
 
       when (segmentCount /= 1) $ fail "only single-segment splitfiles for now"

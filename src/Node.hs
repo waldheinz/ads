@@ -89,14 +89,20 @@ waitResponse node mid = do
   chan    <- atomically $ dupTChan (nodeIncoming node)
 
   let
+    doWait = orElse
+      (readTChan chan   >>= checkResponse)
+      (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else doWait)
+    
     checkResponse msg = case msg of
-      (_, (Response mid' rp)) -> if mid == mid' then (putTMVar bucket $ Just rp) else retry
-      _                       -> retry
-  
+      (_, (Response mid' rp)) -> if mid == mid' then (putTMVar bucket $ Just rp) else doWait
+      _                       -> doWait
+
   -- wait for data or timeout
-  void $ forkIO $ atomically $ orElse
-    (readTChan chan   >>= checkResponse)
-    (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
+  void $ forkIO $ atomically $ doWait
+
+--    forever $ orElse
+--    (readTChan chan   >>= checkResponse)
+--    (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
 
   return bucket
 
@@ -319,7 +325,7 @@ runPeerNode
   -> Maybe (Peer a)
   -> IO ()
 runPeerNode node (src, sink) expected = do
-  mq <- newTBMQueueIO 5
+  mq <- newTBMQueueIO 50
   
   -- enqueue the obligatory Hello message, if this is an
   -- outgoing connection

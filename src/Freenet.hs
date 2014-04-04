@@ -65,14 +65,18 @@ offerChk fn toStore df = do
 waitKeyTimeout :: DataBlock f => TChan f -> Key -> IO (TMVar (Maybe f))
 waitKeyTimeout chan loc = do
   bucket  <- newEmptyTMVarIO
-  timeout <- registerDelay $ 10 * 1000 * 1000
+  timeout <- registerDelay $ 30 * 1000 * 1000
   chan'   <- atomically $ dupTChan chan
+
+  let
+    doWait = orElse
+      (readTChan chan' >>= \cf -> if dataBlockLocation cf == loc then putTMVar bucket (Just cf) else doWait)
+      (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else doWait)
+
   
   -- wait for data or timeout
-  void $ forkIO $ atomically $ orElse
-    (readTChan chan' >>= \cf -> if dataBlockLocation cf == loc then putTMVar bucket (Just cf) else retry)
-    (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
-
+  void $ forkIO $ atomically $ doWait
+  
   return bucket
 
 -- |
