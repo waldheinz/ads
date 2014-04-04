@@ -178,13 +178,13 @@ handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = do
   -- record routing state
 --  atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rmsg, ri) m
   case rmsg of
-    FreenetChkRequest req -> do
+    FreenetChkRequest req -> void $ forkIO $ do
       local <- FN.getChk (nodeFreenet node) req
       case local of
         Left _    -> sendRoutedMessage node rm -- pass on
         Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
 
-    FreenetSskRequest req -> do
+    FreenetSskRequest req -> void $ forkIO $ do
       local <- FN.getSsk (nodeFreenet node) req
       case local of
         Left _    -> sendRoutedMessage node rm
