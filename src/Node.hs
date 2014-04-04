@@ -346,7 +346,7 @@ runPeerNode node (src, sink) expected = do
           (\_ -> do
               logI $ "lost connection to " ++ (show $ peerNodeInfo $ nodePeer pn)
               atomically $ removePeer (nodePeers node) pn)
-          (C.mapM_ $ handlePeerMessage node pn)
+          (C.mapM_ $ \msg -> print ("incoming", msg) >> handlePeerMessage node pn msg)
         
       x       -> error $ show x
         
