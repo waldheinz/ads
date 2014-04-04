@@ -48,13 +48,12 @@ requestNodeData n (SSK pkh key extra dn _) = do
     Right blk -> decryptDataBlock blk key $ sskExtraCrypto extra
 
 requestNodeData n (USK pkh key extra dn dr _) = do
-  result <- requestSsk n $ SskRequest pkh (sskEncryptDocname key dn') (sskExtraCrypto extra)
+  result <- let dn' = dn `T.append` "-" `T.append` (T.pack $ show dr)
+            in requestSsk n $ SskRequest pkh (sskEncryptDocname key dn') (sskExtraCrypto extra)
 
   return $ case result of
     Left e    -> Left e
     Right blk -> decryptDataBlock blk key $ sskExtraCrypto extra
-  where
-    dn' = dn `T.append` "-" `T.append` (T.pack $ show dr)
     
 -- |
 -- Tries to fetch the specified URI, parses metadata if it's
@@ -73,8 +72,10 @@ fetchUri fn uri = do
                          print "fetchUri: metadata"
                          case parseMetadata plaintext of
                            Left e   -> return $ Left e
-                           Right md -> resolvePath fn (uriPath uri) Nothing (Just md)
+                           Right md -> resolvePath fn (uriPath uri) md Nothing
                        else print "fetchUri: direct" >> (return $ Right plaintext)
+
+
 
 fetchUris :: Show a => Node a -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
 fetchUris fn uris = do
@@ -86,9 +87,9 @@ fetchRedirect fn (RedirectKey _ uri) path = do
   logI $ "fetch redirect to " ++ show uri ++ " with path " ++ show path
 --   requestNodeData fn uri
   fetchUri fn $ appendUriPath uri path
-  if isControlDocument uri
-  then fetchUri fn $ appendUriPath uri path
-  else requestNodeData fn uri
+--  if isControlDocument uri
+--  then fetchUri fn $ appendUriPath uri path
+--  else requestNodeData fn uri
   
 fetchRedirect fn (SplitFile comp dlen olen segs _) _ = do -- TODO: we're not returning the MIME
   logI $ "fetch split file"
@@ -107,22 +108,27 @@ fetchRedirect fn (SplitFile comp dlen olen segs _) _ = do -- TODO: we're not ret
     then return $ Left $ T.intercalate ", " es
     else decompress comp $ BSL.take (fromIntegral dlen) $ BSL.concat bs
 
-fetchRedirect' :: Show a => Node a -> RedirectTarget -> [T.Text] -> IO (Either T.Text BSL.ByteString)
-fetchRedirect' fn (RedirectKey _ uri) path = do
-  logI $ "fetch redirect' to " ++ show uri ++ " with path " ++ show path
---  requestNodeData fn uri
-  fetchUri fn uri -- $ appendUriPath uri path
---  if not $ isControlDocument uri
---  then fetchUri fn $ appendUriPath uri path
---  else requestNodeData fn uri
-fetchRedirect' fn sf@(SplitFile _ _ _ _ _) path = fetchRedirect fn sf path
+fetchRedirect' :: Show a => Node a -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
+fetchRedirect' fn (RedirectKey _ uri) = do
+  logI $ "fetch redirect' to " ++ show uri
+  mbs <- requestNodeData fn uri
+  case mbs of
+    Left e   -> return $ Left $ "fetchRedirect': error with requestNodeData: " `T.append` e
+    Right bs -> case parseMetadata bs of
+      Left e'  -> return $ Right bs  -- return $ Left $ "fetchRedirect': can't parse metadata: " `T.append` e'
+      Right md -> case md of
+        ArchiveManifest sf@(SplitFile{}) atype _ _ -> fetchRedirect fn sf []
+        _ -> return $ Left $ "fetchRedirect': what shall I do with metadata: " `T.append` (T.pack $ show md)
 
-type Archive = Map.Map String BSL.ByteString
+fetchRedirect' fn sf@(SplitFile _ _ _ _ _) = fetchRedirect fn sf []
+
+type Archive = (Map.Map String BSL.ByteString)
 
 fetchArchive :: Show a => Node a -> RedirectTarget -> ArchiveManifestType -> IO (Either T.Text Archive)
 fetchArchive fn tgt tp = do
-  logI $ "fetching archive"
-  arch <- fetchRedirect' fn tgt []
+  logI $ "fetching archive " ++ show tgt
+  
+  arch <- fetchRedirect' fn tgt
   
   case arch of
     Left e   -> return $ Left e
@@ -133,22 +139,30 @@ fetchArchive fn tgt tp = do
                  _                    -> m
              ) Map.empty (const Map.empty) $ TAR.read bs
       x   -> return $ Left $ T.pack $ "unsupported archive type " ++ show x
-      
+{-
+resolveInArchive
+  :: Show a
+  => Node a
+  -> Archive
+  -> Metadata
+  -> [T.Text]
+  -> IO (Either T.Text BSL.ByteString)
+resolveInArchive _ arch md ps = return $ Left $ T.pack $ "resolveInArchvie: " ++ show ps ++ "   " ++ show arch ++ "(md=
+  -}
+    
 -- | FIXME: watch out for infinite redirects
 resolvePath
   :: Show a => Node a
   -> [T.Text]                          -- ^ path elements to be resolved
-  -> Maybe Archive                     -- ^ archive to resolve simple redirects etc against
-  -> Maybe Metadata                    -- ^ the metadata where we try to locate the entries in
+  -> Metadata                    -- ^ the metadata where we try to locate the entries in
+  -> Maybe Archive                     -- ^ archive to resolve AIR etc. against
   -> IO (Either T.Text BSL.ByteString) -- ^ either we fail, or we locate the final redirect step
 
 -- redirect to default entry in manifest, which has a name of ""
-resolvePath fn [] a md@(Just (Manifest _)) = do
-  logI "redirecting to default entry"
-  resolvePath fn [""] a md
+resolvePath fn [] md@(Manifest _) arch = logI "redirecting to default entry" >> resolvePath fn [""] md arch
 
 -- resolve in archive
-resolvePath fn _ (Just amap) (Just (ArchiveInternalRedirect tgt _)) = do
+resolvePath fn _ (ArchiveInternalRedirect tgt _) (Just amap) = do
   logI $ "resolving AIR to " ++ show tgt
   case Map.lookup (T.unpack tgt) amap of
     Nothing -> return $ Left $ "could not locate \"" `T.append` tgt `T.append` "\" in archive"
@@ -157,12 +171,12 @@ resolvePath fn _ (Just amap) (Just (ArchiveInternalRedirect tgt _)) = do
       return $ Right bs
 
 -- follow simple redirects
-resolvePath fn ps _ (Just (SimpleRedirect _ tgt)) = do
+resolvePath fn ps (SimpleRedirect _ tgt) _ = do
   logI $ "following simple redirect to " ++ (show tgt) ++ " for " ++ show ps
   fetchRedirect fn tgt ps
   
 -- resolve path in manifest
-resolvePath fn (p:ps) a md@(Just (Manifest me)) = do
+resolvePath fn (p:ps) md@(Manifest me) arch = do
   logI $ "resolving " ++ show p ++ " in manifest"
   
   case lookup p me of
@@ -170,21 +184,22 @@ resolvePath fn (p:ps) a md@(Just (Manifest me)) = do
     Just me -> case me of
       SymbolicShortlink tgt -> do
         logI $ "following SSL to " ++ show tgt
-        resolvePath fn (tgt:ps) a md
-      x                     -> resolvePath fn ps    a  (Just x)
+        resolvePath fn (tgt:ps) md arch
+      x                     -> resolvePath fn ps x arch
                              -- return $ Left $ T.concat ["can not resolve ", T.pack $ show x, " against a manifest"]
-
-resolvePath fn ps Nothing (Just (ArchiveManifest tgt@(RedirectKey _ uri) atype _ _)) = do
+{-
+resolvePath fn ps ((ArchiveManifest tgt@(RedirectKey _ uri) atype _ _)) = do
   logI $ "looking up archive at " ++ (show uri) ++ " for " ++ show ps
   arch <- fetchArchive fn tgt atype
   case arch of
     Left e -> return $ Left $ "resolvePath (archive manifest): " `T.append` e
-    Right a -> resolvePath fn ps (Just a) Nothing
-  
-resolvePath fn ps Nothing (Just (ArchiveManifest atgt atype _ _)) = do
+    Right a -> resolveInArchive fn a ps
+  -}
+resolvePath fn ps (ArchiveManifest atgt atype _ _) _ = do
   logI $ "resolving archive manifest " ++ show atgt
   
   arch <- fetchArchive fn atgt atype
+  
   case arch of
     Left e -> return $ Left e
     Right emap -> do
@@ -193,13 +208,12 @@ resolvePath fn ps Nothing (Just (ArchiveManifest atgt atype _ _)) = do
       case Map.lookup ".metadata" emap of
         Nothing -> return $ Left $ T.pack $ "no .metadata entry found in TAR archive: " ++ show ps
         Just mdbs -> case parseMetadata mdbs of
-          Right md -> resolvePath fn ps (Just emap) (Just md) --  set archive as new reference point
+          Right md -> resolvePath fn ps md (Just emap)
           x        -> return $ Left $ "error parsing manifest from TAR archive: " `T.append` (T.pack $ show x)
 
-
 -- give up resolving this path
-resolvePath _ ps a md = return $ Left $ T.concat [
-  "cannot locate ", T.pack (show ps), " in ", T.pack (show md), " with archive", T.pack (show a)]
+resolvePath _ ps md arch = return $ Left $ T.concat [
+  "cannot locate ", T.pack (show ps), " in ", T.pack (show md), " with archive ", T.pack $ show arch]
 
 
 {-
