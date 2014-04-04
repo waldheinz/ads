@@ -13,7 +13,7 @@ module Node (
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
-import Control.Concurrent ( forkIO, killThread )
+import Control.Concurrent ( forkIO, killThread, myThreadId )
 import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
 import Control.Monad ( forever, unless, void, when )
@@ -111,14 +111,20 @@ keyToTarget key = mkNodeId' $ FN.unKey key
 -- peer nodes.
 requestChk :: (Show a) => Node a -> FN.ChkRequest -> IO (Either T.Text FN.ChkBlock)
 requestChk n req = do
-  local <- FN.getChk (nodeFreenet n) req
+  tid <- myThreadId
+  print ("fn", tid, req)
+  local <- return $ Left "xx" -- FN.getChk (nodeFreenet n) req
   case local of
     Right blk -> return $ Right blk
     Left e    -> do
---      logI $ "could not fetch data locally " ++ show e
+      logI $ "could not fetch data locally " ++ show e
+      print ("-> mkr", tid)
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest req)
+      print ("-> wr", tid)
       bucket <- waitResponse n $ rmId msg
+      print ("-> srm", tid)
       sendRoutedMessage n msg
+      print ("-> take", tid)
       result <- atomically $ takeTMVar bucket
       case result of
         Nothing   -> return $ Left "timeout waiting for response"
@@ -128,14 +134,20 @@ requestChk n req = do
 
 requestSsk :: (Show a) => Node a -> FN.SskRequest -> IO (Either T.Text FN.SskBlock)
 requestSsk n req = do
-  local <- FN.getSsk (nodeFreenet n) req
+  tid <- myThreadId
+  print ("sskfn", tid, req)
+  local <- return $ Left "xxssk" -- FN.getSsk (nodeFreenet n) req
   case local of
     Right blk -> return $ Right blk
     Left e    -> do
 --      logI $ "could not fetch data locally " ++ show e
+      print ("-> sskmkr", tid)
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest req)
+      print ("-> sskwr", tid)
       bucket <- waitResponse n $ rmId msg
+      print ("-> ssksrm", tid)
       sendRoutedMessage n msg
+      print ("-> ssktake", tid)
       result <- atomically $ takeTMVar bucket
       case result of
         Nothing   -> return $ Left "timeout waiting for response"
@@ -150,13 +162,17 @@ mkRoutedMessage node target msg = atomically $ do
   return $ RoutedMessage msg mid $ NBO.mkRoutingInfo target
 
 sendRoutedMessage :: Show a => Node a -> RoutedMessage a -> IO ()
-sendRoutedMessage node msg = do
-  result <- atomically $ NBO.route (nodeNbo node) Nothing msg
+sendRoutedMessage node msg = myThreadId >>= \tid -> do
+  mlog <- atomically $ do
+    result <- NBO.route (nodeNbo node) Nothing msg
+    case result of
+      NBO.Forward dest msg -> enqMessage dest (Routed msg) >> (return $ Just $ print ("forwarded", tid))
+      NBO.Fail             -> return $ Just $ logI $ "message failed fatally: " ++ show msg
 
-  case result of
-    NBO.Forward dest msg -> atomically $ enqMessage dest $ Routed msg
-    NBO.Fail             -> logI $ "message failed fatally: " ++ show msg
-
+  case mlog of
+    Nothing -> return ()
+    Just l  -> l
+  
 sendResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
 sendResponse node mid msg = do
   mtgt <- atomically $ do
@@ -174,17 +190,17 @@ handlePeerMessage :: Show a => Node a -> PeerNode a -> Message a -> IO ()
 handlePeerMessage node pn m@(Response mid msg) = do
   atomically $ writeTChan (nodeIncoming node) (pn, m)
 --  logI $ "got a reply: " ++ show m
-handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = do
+handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = void $ forkIO $ do
   -- record routing state
 --  atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rmsg, ri) m
   case rmsg of
-    FreenetChkRequest req -> void $ forkIO $ do
+    FreenetChkRequest req -> do
       local <- FN.getChk (nodeFreenet node) req
       case local of
         Left _    -> sendRoutedMessage node rm -- pass on
         Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
 
-    FreenetSskRequest req -> void $ forkIO $ do
+    FreenetSskRequest req -> do
       local <- FN.getSsk (nodeFreenet node) req
       case local of
         Left _    -> sendRoutedMessage node rm

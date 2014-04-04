@@ -10,6 +10,7 @@ module Freenet.Fetch (
 
 import qualified Codec.Archive.Tar as TAR
 import qualified Codec.Archive.Zip as ZIP
+import Control.Concurrent ( myThreadId )
 import Control.Exception ( catch, ErrorCall )
 import qualified Data.ByteString.Lazy as BSL
 import Data.Either ( partitionEithers )
@@ -63,7 +64,8 @@ requestNodeData n (USK pkh key extra dn dr _) = do
 -- and finally returns everything
 fetchUri :: (Show a) => Node a -> URI -> IO (Either T.Text BSL.ByteString)
 fetchUri fn uri = do
-  logI $ "fetching " ++ show uri
+  tid <- myThreadId
+  logI $ "fetching " ++ show uri ++ " on " ++ show tid
   
   db <- requestNodeData fn uri
   
