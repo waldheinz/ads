@@ -9,6 +9,8 @@ module Freenet.Fetch (
   ) where
 
 import qualified Codec.Archive.Tar as TAR
+import qualified Codec.Archive.Zip as ZIP
+import Control.Exception ( catch, ErrorCall )
 import qualified Data.ByteString.Lazy as BSL
 import Data.Either ( partitionEithers )
 import qualified Data.Map.Strict as Map
@@ -121,7 +123,16 @@ fetchArchive fn tgt tp = do
   logI $ "fetching archive " ++ show tgt
   
   arch <- fetchRedirect' fn tgt
-  
+
+  let
+    parseZip zbs = catch (return $ Right go) handler where
+      handler :: ErrorCall -> IO (Either T.Text Archive)
+      handler e = return $ Left $ T.pack $ show e
+      
+      entries = ZIP.zEntries $ ZIP.toArchive zbs
+      
+      go = Map.fromList $ map (\e -> (ZIP.eRelativePath e, ZIP.fromEntry e)) entries
+      
   case arch of
     Left e   -> return $ Left e
     Right bs -> case tp of
@@ -130,7 +141,8 @@ fetchArchive fn tgt tp = do
                  TAR.NormalFile ebs _ -> Map.insert (TAR.entryPath e) ebs m
                  _                    -> m
              ) Map.empty (const Map.empty) $ TAR.read bs
-      x   -> return $ Left $ T.pack $ "unsupported archive type " ++ show x
+      ZIP -> parseZip bs
+--      x   -> return $ Left $ T.pack $ "unsupported archive type " ++ show x
     
 -- | FIXME: watch out for infinite redirects
 resolvePath

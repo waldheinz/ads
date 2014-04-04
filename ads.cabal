@@ -55,6 +55,7 @@ executable ads
     void                 >= 0.6,
     wai                  >= 2.1,
     warp                 >= 2.1,
+    zip-archive          >= 0.2,
     zlib                 >= 0.5
 
   hs-source-dirs:      src
