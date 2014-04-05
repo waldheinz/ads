@@ -155,7 +155,7 @@ mkRoutedMessage node target msg = atomically $ do
   return $ RoutedMessage msg mid $ NBO.mkRoutingInfo target
 
 sendRoutedMessage :: Show a => Node a -> RoutedMessage a -> IO ()
-sendRoutedMessage node msg = myThreadId >>= \tid -> do
+sendRoutedMessage node msg = do
   mlog <- atomically $ do
     result <- NBO.route (nodeNbo node) Nothing msg
     case result of
@@ -179,23 +179,34 @@ sendResponse node mid msg = do
     Just (pn, _, _) -> do
       atomically $ enqMessage pn $ Response mid msg
 
-handlePeerMessage :: Show a => Node a -> PeerNode a -> Message a -> IO ()
-handlePeerMessage node pn m@(Response mid msg) = do
-  atomically $ writeTChan (nodeIncoming node) (pn, m)
-handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = void $ forkIO $ do
-  case rmsg of
-    FreenetChkRequest req -> do
-      local <- FN.getChk (nodeFreenet node) req
-      case local of
-        Left _    -> sendRoutedMessage node rm -- pass on
-        Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
+handleFreenetRequests :: Show a => Node a -> IO ()
+handleFreenetRequests node = do
+  chan <- atomically $ dupTChan $ nodeIncoming node
 
-    FreenetSskRequest req -> do
-      local <- FN.getSsk (nodeFreenet node) req
-      case local of
-        Left _    -> sendRoutedMessage node rm
-        Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
+  let
+    fn = nodeFreenet node
+  
+  void $ forkIO $ forever $ do
+    (pn, msg) <- atomically $ readTChan chan
 
+    case msg of
+      Routed rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
+        local <- FN.getChk fn req
+        case local of
+          Left _    -> sendRoutedMessage node rm -- pass on
+          Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
+
+      Routed rm@(RoutedMessage (FreenetSskRequest req) mid _) -> do
+        local <- FN.getSsk fn req
+        case local of
+          Left _    -> sendRoutedMessage node rm -- pass on
+          Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
+
+      Response mid msg' -> do
+        return ()
+
+      _ -> return ()
+      
 -- |
 -- Installs a incoming message handler which will offer all data blocks
 -- coming along this node to the Freenet subsystem, which may then put
@@ -351,7 +362,7 @@ runPeerNode node (src, sink) expected = do
           (\_ -> do
               logI $ "lost connection to " ++ (show $ peerNodeInfo $ nodePeer pn)
               atomically $ removePeer (nodePeers node) pn)
-          (C.mapM_ $ handlePeerMessage node pn)
+          (C.mapM_ $ \m -> atomically $ writeTChan (nodeIncoming node) (pn, m))
         
       x       -> error $ show x
         
