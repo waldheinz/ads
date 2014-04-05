@@ -4,12 +4,19 @@
 module Message (
   MessagePayload(..), RoutedMessage(..), 
   MessageSource, MessageSink, MessageIO,
-  Message(..), MessageId
+  Message(..),
+  -- * Message IDs
+  MessageId, MessageIdGen, mkMessageIdGen, nextMessageId
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
+import Control.Concurrent ( forkIO )
+import Control.Concurrent.STM
+import Control.Monad ( void )
+import qualified Crypto.Random.AESCtr as AESRNG
 import Data.Binary
 import Data.Conduit
+import System.Random ( random )
 
 import qualified Freenet.Chk as FN
 import qualified Freenet.Ssk as FN
@@ -29,8 +36,34 @@ type MessageSink a = Sink (Message a) IO ()
 -- A (source, sink) pair of messages, suitable for talking to a node.
 type MessageIO a = (MessageSource a, MessageSink a)
 
+-------------------------------------------------------------------------------------
+-- Message IDs
+-------------------------------------------------------------------------------------
+
 type MessageId = Word64
 
+newtype MessageIdGen = MessageIdGen { unMessageIdGen :: TBQueue Word64  }
+
+mkMessageIdGen :: IO MessageIdGen
+mkMessageIdGen = do
+  q   <- newTBQueueIO 64
+  rng <- AESRNG.makeSystem
+
+  let makeId r = let (next, r') = random r
+                 in do
+                   atomically $ writeTBQueue q next
+                   makeId r'
+  
+  void $ forkIO $ makeId rng
+  return $ MessageIdGen q
+
+nextMessageId :: MessageIdGen -> STM MessageId
+nextMessageId = readTBQueue . unMessageIdGen
+
+-------------------------------------------------------------------------------------
+-- Message Payload
+-------------------------------------------------------------------------------------
+  
 -- |
 -- Messages are parametrised over the type of Peer addresses used, which could
 -- be either hostnames or message queues for simulations.

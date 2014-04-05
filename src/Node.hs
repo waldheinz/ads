@@ -56,7 +56,7 @@ logW m = warningM "node" m
 data Node a = Node
             { nodePeers    :: Peers a
             , nodeIdentity :: Peer a
-            , nextMsgId    :: TVar Word64
+            , nodeMidGen   :: MessageIdGen
             , nodeActMsgs  :: TVar (Map.Map MessageId (PeerNode a, MessagePayload a, NBO.RoutingInfo NodeId)) -- ^ messages we're currently routing
             , nodeNbo      :: NBO.Node NodeId (RoutedMessage a) (PeerNode a)      -- ^ our NBO identity for routing
             , nodeFreenet  :: FN.Freenet a                                        -- ^ our freenet compatibility layer
@@ -66,11 +66,8 @@ data Node a = Node
 
 mkNode :: (Show a) => Peer a -> FN.Freenet a -> IO (Node a)
 mkNode self fn = do
-  (peers, nmid) <- atomically $ do
-    ps <- mkPeers
-    mid <- newTVar 0
-    return (ps, mid)
-
+  peers <- atomically $ mkPeers
+  midgen <- mkMessageIdGen
   msgMap <- newTVarIO Map.empty
   incoming <- newBroadcastTChanIO
   ac <- FN.mkArchiveCache 10
@@ -86,7 +83,7 @@ mkNode self fn = do
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
         
-  let node = Node peers self nmid msgMap nbo fn incoming ac
+  let node = Node peers self midgen msgMap nbo fn incoming ac
   writeToStores node
   return node
 
@@ -154,8 +151,7 @@ requestSsk n req = do
 
 mkRoutedMessage :: Node a -> NodeId -> MessagePayload a -> IO (RoutedMessage a)
 mkRoutedMessage node target msg = atomically $ do
-  mid <- readTVar (nextMsgId node)
-  modifyTVar (nextMsgId node) (+1)
+  mid <- nextMessageId $ nodeMidGen node
   return $ RoutedMessage msg mid $ NBO.mkRoutingInfo target
 
 sendRoutedMessage :: Show a => Node a -> RoutedMessage a -> IO ()
