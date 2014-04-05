@@ -2,35 +2,73 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet.Archive (
-  Archive, fetchArchive
+  Archive, fetchArchive,
+  ArchiveCache, mkArchiveCache
   ) where
 
 import qualified Codec.Archive.Tar as TAR
 import qualified Codec.Archive.Zip as ZIP
+import Control.Applicative ( (<$>) )
+import Control.Concurrent ( forkIO )
+import Control.Concurrent.STM
 import Control.Exception ( catch, ErrorCall )
+import Control.Monad ( when, void )
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.Cache.LRU as LRU
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import System.Log.Logger
 
 import Freenet.Metadata
 import Freenet.SplitFile
-import Node
+import Types
 
-type Archive = (Map.Map String BSL.ByteString)
+-- |
+-- An Archive is just a map from file names to file contents.
+type Archive = Map.Map String BSL.ByteString
 
 logI :: String -> IO ()
 logI m = infoM "freenet.archive" m
 
-----------------------------------------------------------------------------------------------------
--- Archives
-----------------------------------------------------------------------------------------------------
+newtype ArchiveKey = ArchiveKey (RedirectTarget, ArchiveType) deriving ( Eq, Ord )
 
-fetchArchive :: Show a => Node a -> RedirectTarget -> ArchiveType -> IO (Either T.Text Archive)
-fetchArchive fn tgt tp = do
+newtype ArchiveProgress = ArchiveProgress { unProgress :: TMVar (Either T.Text Archive) }
+
+data ArchiveCache = ArchiveCache
+                    { acLru :: TVar (LRU.LRU ArchiveKey ArchiveProgress)
+                    }
+
+mkArchiveCache :: Integer -> IO ArchiveCache
+mkArchiveCache size = do
+  lru <- newTVarIO $ LRU.newLRU $ Just size
+  return $ ArchiveCache lru
+
+fetchArchive :: UriFetch a => a -> ArchiveCache -> RedirectTarget -> ArchiveType -> IO (Either T.Text Archive)
+fetchArchive fetch ac tgt tp = do
+  let ak = ArchiveKey (tgt, tp)
+      
+  (prog, needStart) <- atomically $ do
+    lru <- readTVar (acLru ac)
+    let (lru', mprog) = LRU.lookup ak lru
+    
+    case mprog of
+      Just p  -> writeTVar (acLru ac) lru' >> return (p, False)
+      Nothing -> do
+        p <- ArchiveProgress <$> newEmptyTMVar
+        writeTVar (acLru ac) $ LRU.insert ak p lru
+        return (p, True)
+  
+  when needStart $ void $ forkIO $ do
+    arch <- fetchArchive' fetch tgt tp
+    atomically $ putTMVar (unProgress prog) arch
+
+  atomically $ readTMVar (unProgress prog)
+
+fetchArchive' :: UriFetch a => a -> RedirectTarget -> ArchiveType -> IO (Either T.Text Archive)
+fetchArchive' fetch tgt tp = do
   logI $ "fetching archive " ++ show tgt
   
-  arch <- fetchRedirect' fn tgt
+  arch <- fetchRedirect' fetch tgt
 
   let
     parseZip zbs = catch (return $ Right go) handler where
@@ -50,18 +88,18 @@ fetchArchive fn tgt tp = do
                  _                    -> m
              ) Map.empty (const Map.empty) $ TAR.read bs
       ZIP -> parseZip bs
---      x   -> return $ Left $ T.pack $ "unsupported archive type " ++ show x
 
-fetchRedirect' :: Show a => Node a -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
-fetchRedirect' fn (RedirectKey _ uri) = do
+fetchRedirect' :: UriFetch a => a -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
+fetchRedirect' fetch (RedirectKey _ uri) = do
   logI $ "fetch redirect' to " ++ show uri
-  mbs <- requestNodeData fn uri
+  mbs <- getUriData fetch uri
   case mbs of
     Left e   -> return $ Left $ "fetchRedirect': error with requestNodeData: " `T.append` e
     Right bs -> case parseMetadata bs of
       Left _  -> return $ Right bs  -- return $ Left $ "fetchRedirect': can't parse metadata: " `T.append` e'
       Right md -> case md of
-        ArchiveManifest (RedirectSplitFile sf) _ _ _ -> fetchSplitFile fn sf
+        ArchiveManifest (RedirectSplitFile sf) _ _ _ -> fetchSplitFile fetch sf
         _ -> return $ Left $ "fetchRedirect': what shall I do with metadata: " `T.append` (T.pack $ show md)
 
-fetchRedirect' fn (RedirectSplitFile sf) = fetchSplitFile fn sf
+fetchRedirect' fetch (RedirectSplitFile sf) = fetchSplitFile fetch sf
+

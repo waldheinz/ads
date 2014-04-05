@@ -21,7 +21,7 @@ import qualified Data.Text as T
 
 -- |
 -- Supported compression algorithms
-data CompressionCodec = None | Gzip | Bzip2 | LZMA | LZMA_NEW deriving ( Eq, Show )
+data CompressionCodec = None | Gzip | Bzip2 | LZMA | LZMA_NEW deriving ( Eq, Ord, Show )
 
 decompress :: CompressionCodec -> BSL.ByteString -> IO (Either T.Text BSL.ByteString)
 decompress comp cdata = case comp of

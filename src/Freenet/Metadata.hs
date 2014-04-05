@@ -35,7 +35,7 @@ import Freenet.URI
 -- Metadata Parsing
 ---------------------------------------------------------------------------------------
 
-data ArchiveType = ZIP | TAR deriving ( Eq, Show )
+data ArchiveType = ZIP | TAR deriving ( Eq, Ord, Show )
 
 flagSet :: (Bits a) => a -> a -> Bool
 flagSet flags flag = flags .&. flag == flag
@@ -135,7 +135,7 @@ data RedirectTarget
     { rkMime :: Maybe Mime
     , rkUri  :: URI
     }
-    deriving ( Show )
+    deriving ( Eq, Ord, Show )
 
 getCompression
   :: Word16                         -- ^ flags

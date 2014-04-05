@@ -42,6 +42,7 @@ executable ads
     hashable             >= 1.2,
     hslogger             >= 1.2,
     http-types           >= 0.8,
+    lrucache             >= 1.1,
     network              >= 2.4,
     network-conduit      >= 1.0,
     SHA                  >= 1.6,

@@ -50,7 +50,7 @@ data URI
        , uskDocName    :: T.Text
        , uskRevision   :: Integer
        , uskPath       :: [T.Text]
-       }
+       } deriving ( Eq, Ord )
 
 instance Show URI where
   show (CHK l k e p)     =
@@ -192,7 +192,7 @@ uriPath (USK _ _ _ _ _ p) = p
 -- CHK extra data (last URI component)
 --------------------------------------------------------------------------------------
 
-newtype ChkExtra = ChkExtra { unChkExtra :: BS.ByteString }
+newtype ChkExtra = ChkExtra { unChkExtra :: BS.ByteString } deriving ( Eq, Ord )
 
 instance Show ChkExtra where
   show (ChkExtra bs) = T.unpack $ toBase64' bs
@@ -235,7 +235,7 @@ chkExtraCompression ce
 -- SSK specifics
 ---------------------------------------------------------------------------
 
-newtype SskExtra = SskExtra { unSskExtra :: BS.ByteString }
+newtype SskExtra = SskExtra { unSskExtra :: BS.ByteString } deriving ( Eq, Ord )
 
 instance Show SskExtra where
   show (SskExtra bs) = T.unpack $ toBase64' bs

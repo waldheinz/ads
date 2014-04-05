@@ -5,14 +5,12 @@ module Freenet.Fproxy (
   fproxy
   ) where
 
-import Control.Concurrent ( myThreadId )
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as T
 import Data.Text.Encoding ( encodeUtf8 )
 import Network.HTTP.Types.Status
 import qualified Network.Wai as WAI
 
---import Freenet
 import Node
 import Freenet.Fetch
 import Freenet.URI
@@ -26,9 +24,6 @@ fproxy fn req = do
   let
     path = T.intercalate "/" $ WAI.pathInfo req
 
-  tid <- myThreadId
-  print ("FPROXY", tid, path)
-  
   case parseUri path of
     Left e    -> return $ er e
     Right uri -> do

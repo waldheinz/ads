@@ -13,17 +13,17 @@ import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
 import System.Log.Logger
 
-import Node
 import Freenet.Compression
 import Freenet.Mime
 import Freenet.URI
+import Types
 
 data SplitFileSegment
   = SplitFileSegment
     { sfUri   :: ! URI   -- ^ the URI where this segment can be fetched
     , sfsData :: ! Bool  -- ^ True if this is a data block, false if it's a check block
     }
-    deriving ( Show )
+    deriving ( Eq, Ord, Show )
 
 
 data SplitFile = SplitFile
@@ -32,17 +32,17 @@ data SplitFile = SplitFile
                  , sfOriginalSize   :: Word64             -- ^ size of original data before compression was applied
                  , sfSegments       :: [SplitFileSegment] -- ^ the segments this split consists of
                  , sfMime           :: Maybe Mime         -- ^ MIME type of the target data
-                 } deriving ( Show )
+                 } deriving ( Eq, Ord, Show )
 
 logI :: String -> IO ()
 logI m = infoM "freenet.splitfile" m
 
-fetchUris :: (Show a) => Node a -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
+fetchUris :: (UriFetch a) => a -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
 fetchUris fn uris = do
-  result <- sequence $ map (requestNodeData fn) uris
+  result <- sequence $ map (getUriData fn) uris
   return $ zip uris result
 
-fetchSplitFile :: (Show a) => Node a -> SplitFile -> IO (Either T.Text BSL.ByteString)
+fetchSplitFile :: (UriFetch a) => a -> SplitFile -> IO (Either T.Text BSL.ByteString)
 fetchSplitFile fn (SplitFile comp dlen _ segs _) = do -- TODO: we're not returning the MIME and ignoring the original length
   logI $ "fetch split file"
   

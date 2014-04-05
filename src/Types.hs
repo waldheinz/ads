@@ -4,7 +4,8 @@
 module Types (
   NodeId, mkNodeId', NodeInfo(..),
   
-  Peer(..), mkPeer
+  Peer(..), mkPeer,
+  UriFetch(..)
   ) where
 
 import Control.Applicative ( pure, (<$>), (<*>) )
@@ -15,11 +16,14 @@ import Data.Binary.Get
 import Data.Binary.Put
 import Data.Bits ( shiftL )
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Base16 as HEX
 import qualified Data.ByteString.Char8 as BSC
 import Data.Ratio ( (%) )
+import qualified Data.Text as T
 import Data.Text.Encoding ( encodeUtf8 )
 
+import qualified Freenet.URI as FN
 import qualified NextBestOnce as NBO
 
 ----------------------------------------------------------------------
@@ -96,3 +100,9 @@ instance (Binary a) => Binary (Peer a) where
 mkPeer :: NodeInfo -> a -> Peer a
 mkPeer ni addr = Peer ni addr
 
+-----------------------------------------------------------------
+-- Fetching Data
+-----------------------------------------------------------------
+
+class UriFetch a where
+  getUriData :: a -> FN.URI -> IO (Either T.Text BSL.ByteString)

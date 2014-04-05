@@ -89,7 +89,7 @@ resolvePath fn (p:ps) md@(Manifest me) arch = do
 resolvePath fn ps (ArchiveManifest atgt atype _ _) _ = do
   logI $ "resolving archive manifest " ++ show atgt
   
-  arch <- fetchArchive fn atgt atype
+  arch <- fetchArchive fn (nodeArchives fn) atgt atype
   
   case arch of
     Left e -> return $ Left e

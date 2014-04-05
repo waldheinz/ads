@@ -4,8 +4,7 @@
 module Node (
   -- * our node
   Node, mkNode,
---  requestChk, requestSsk,
-  requestNodeData,
+  requestNodeData, nodeArchives,
   
   -- * peers
   ConnectFunction, initPeers,
@@ -20,6 +19,7 @@ import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
 import Control.Monad ( forever, unless, void, when )
 import Control.Monad.IO.Class ( liftIO )
+
 import Data.Aeson
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
@@ -34,6 +34,7 @@ import System.FilePath ( (</>) )
 import System.Log.Logger
 
 import qualified Freenet as FN
+import qualified Freenet.Archive as FN
 import qualified Freenet.Chk as FN
 import qualified Freenet.Ssk as FN
 import qualified Freenet.Types as FN
@@ -60,6 +61,7 @@ data Node a = Node
             , nodeNbo      :: NBO.Node NodeId (RoutedMessage a) (PeerNode a)      -- ^ our NBO identity for routing
             , nodeFreenet  :: FN.Freenet a                                        -- ^ our freenet compatibility layer
             , nodeIncoming :: TChan (PeerNode a, Message a)                       -- ^ stream of incoming messages
+            , nodeArchives :: FN.ArchiveCache
             }
 
 mkNode :: (Show a) => Peer a -> FN.Freenet a -> IO (Node a)
@@ -71,6 +73,7 @@ mkNode self fn = do
 
   msgMap <- newTVarIO Map.empty
   incoming <- newBroadcastTChanIO
+  ac <- FN.mkArchiveCache 10
   
   let
     fst' (a, _, _) = a
@@ -83,7 +86,7 @@ mkNode self fn = do
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
         
-  return $ Node peers self nmid msgMap nbo fn incoming
+  return $ Node peers self nmid msgMap nbo fn incoming ac
 
 waitResponse :: Node a -> MessageId -> IO (TMVar (Maybe (MessagePayload a)))
 waitResponse node mid = do
@@ -342,6 +345,9 @@ runPeerNode node (src, sink) expected = do
       x       -> error $ show x
         
   C.addCleanup (\_ -> killThread tid) (C.sourceTBMQueue mq) C.$$ sink
+
+instance (Show a) => UriFetch (Node a) where
+  getUriData = requestNodeData
 
 requestNodeData :: (Show a) => Node a -> FN.URI -> IO (Either T.Text BSL.ByteString)
 requestNodeData n (FN.CHK loc key extra _) = do
