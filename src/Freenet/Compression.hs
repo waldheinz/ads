@@ -5,7 +5,9 @@ module Freenet.Compression (
   CompressionCodec(..), decompress
   ) where
 
+import qualified Codec.Compression.BZip as Bzip
 import qualified Codec.Compression.GZip as Gzip
+import Control.Exception ( catch, ErrorCall )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
 import qualified Data.ByteString.Lazy as BSL
@@ -24,7 +26,8 @@ data CompressionCodec = None | Gzip | Bzip2 | LZMA | LZMA_NEW deriving ( Eq, Sho
 decompress :: CompressionCodec -> BSL.ByteString -> IO (Either T.Text BSL.ByteString)
 decompress comp cdata = case comp of
   None     -> return $ Right $ cdata
-  Gzip     -> return $ Right $ Gzip.decompress cdata -- FIXME: does decompress throw on illegal input? seems likely
+  Bzip2    -> catch (return $ Right $ Bzip.decompress $ BSL.pack [0x42, 0x5a] `BSL.append` cdata) ehandler
+  Gzip     -> catch (return $ Right $ Gzip.decompress cdata) ehandler
   LZMA     -> do
     lzma <- initLzma $ BS.pack [0x5d, 0x00, 0x00, 0x10, 0x00]
     dec <- decodeLzma lzma $ BSL.toStrict cdata
@@ -35,7 +38,8 @@ decompress comp cdata = case comp of
     dec <- decodeLzma lzma $ BSL.toStrict cd
     return $ Right $ BSL.fromStrict dec
 
-  x        -> return $ Left $ T.pack $ "unsupported compression codec " ++ show x
+ehandler :: ErrorCall -> IO (Either T.Text BSL.ByteString)
+ehandler e = return $ Left $ "decompression failed: " `T.append` (T.pack $ show e)
 
 ----------------------------------------------------------------------------------
 -- LZMA

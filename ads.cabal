@@ -30,6 +30,7 @@ executable ads
     binary               >= 0.5,
     binary-conduit       >= 1.2,
     bytestring           >= 0.10,
+    bzlib                >= 0.5,
     cipher-aes           >= 0.2,
     concurrent-extra     >= 0.7,
     conduit              >= 1.0,
