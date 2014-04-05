@@ -104,11 +104,8 @@ getMime flags =
        then do
          x <- getWord16be
          when (x > 32767) $ void getWord16be -- compessed MIME params, whatever?
-         case lookup x defaultMimes of
-           Nothing   -> fail $ "unknown default mime " ++ show x
-           Just mime -> return $ Just mime
+         return $ Just $ lookupMime defaultMimes x
        else fail "only compressed MIME supported"
-
 
 getSplitFileSegment
   :: Maybe (Key, Word8)    -- ^ maybe common (decryption key, algorithm)
