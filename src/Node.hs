@@ -86,7 +86,9 @@ mkNode self fn = do
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
         
-  return $ Node peers self nmid msgMap nbo fn incoming ac
+  let node = Node peers self nmid msgMap nbo fn incoming ac
+  writeToStores node
+  return node
 
 waitResponse :: Node a -> MessageId -> IO (TMVar (Maybe (MessagePayload a)))
 waitResponse node mid = do
@@ -184,10 +186,7 @@ sendResponse node mid msg = do
 handlePeerMessage :: Show a => Node a -> PeerNode a -> Message a -> IO ()
 handlePeerMessage node pn m@(Response mid msg) = do
   atomically $ writeTChan (nodeIncoming node) (pn, m)
---  logI $ "got a reply: " ++ show m
 handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = void $ forkIO $ do
-  -- record routing state
---  atomically $ modifyTVar (nodeActMsgs node) $ \m -> Map.insert mid (pn, rmsg, ri) m
   case rmsg of
     FreenetChkRequest req -> do
       local <- FN.getChk (nodeFreenet node) req
@@ -200,7 +199,23 @@ handlePeerMessage node pn (Routed rm@(RoutedMessage rmsg mid ri)) = void $ forkI
       case local of
         Left _    -> sendRoutedMessage node rm
         Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
-      
+
+-- |
+-- Installs a incoming message handler which will offer all data blocks
+-- coming along this node to the Freenet subsystem, which may then put
+-- them in it's store(s) when it sees fit.
+writeToStores :: Show a => Node a -> IO ()
+writeToStores node = do
+  chan <- atomically $ dupTChan $ nodeIncoming node
+
+  void $ forkIO $ forever $ do
+    (_, msg) <- atomically $ readTChan chan
+
+    case msg of
+      Response _ (FreenetChkBlock blk) -> FN.offerChk (nodeFreenet node) blk
+      Response _ (FreenetSskBlock blk) -> FN.offerSsk (nodeFreenet node) blk
+      _                                -> return ()
+
 type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
 
 ----------------------------------------------------------------

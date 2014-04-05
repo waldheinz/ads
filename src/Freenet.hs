@@ -2,12 +2,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet (
-  Freenet, initFn, getChk, getSsk
+  Freenet, initFn,
+  getChk, getSsk,
+  offerChk, offerSsk
   ) where
 
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
-import Control.Monad ( void, when )
+import Control.Monad ( void )
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import qualified Data.Text as T
@@ -49,17 +51,17 @@ initFn cfg = do
   case chost of
     Nothing -> return fn
     Just _  -> do
-      comp <- FC.initCompanion ccfg (offerChk fn True) (offerSsk fn True)
+      comp <- FC.initCompanion ccfg (offerChk fn) (offerSsk fn)
       return $ fn { fnCompanion = Just comp }
 
-offerSsk :: Freenet a -> Bool -> SskBlock -> IO ()
-offerSsk fn toStore df = do
-  when toStore $ FS.putData (fnSskStore fn) df
+offerSsk :: Freenet a -> SskBlock -> IO ()
+offerSsk fn df = do
+  FS.putData (fnSskStore fn) df
   atomically $ writeTChan (fnIncomingSsk fn) df
 
-offerChk :: Freenet a -> Bool -> ChkBlock -> IO ()
-offerChk fn toStore df = do
-  when toStore $ FS.putData (fnChkStore fn) df
+offerChk :: Freenet a -> ChkBlock -> IO ()
+offerChk fn df = do
+  FS.putData (fnChkStore fn) df
   atomically $ writeTChan (fnIncomingChk fn) df
 
 waitKeyTimeout :: DataBlock f => TChan f -> Key -> IO (TMVar (Maybe f))
