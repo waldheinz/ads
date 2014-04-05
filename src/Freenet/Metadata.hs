@@ -3,17 +3,13 @@
 
 module Freenet.Metadata (
   -- * Metadata
-  Metadata(..), parseMetadata, CompressionCodec(..),
-  ManifestEntries,
+  Metadata(..), parseMetadata,  ManifestEntries,
 
   -- * Redirects
   RedirectTarget(..),
 
-  -- * Splitfiles
-  SplitFileSegment(..),
-
   -- * Archive Manifests
-  ArchiveManifestType(..), TopBlock(..)
+  TopBlock(..), ArchiveType(..)
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
@@ -31,12 +27,15 @@ import Data.Text.Encoding ( decodeUtf8' )
 
 import Freenet.Compression
 import Freenet.Mime
+import Freenet.SplitFile
 import Freenet.Types
 import Freenet.URI
      
 ---------------------------------------------------------------------------------------
 -- Metadata Parsing
 ---------------------------------------------------------------------------------------
+
+data ArchiveType = ZIP | TAR deriving ( Eq, Show )
 
 flagSet :: (Bits a) => a -> a -> Bool
 flagSet flags flag = flags .&. flag == flag
@@ -110,12 +109,6 @@ getMime flags =
            Just mime -> return $ Just mime
        else fail "only compressed MIME supported"
 
-data SplitFileSegment
-  = SplitFileSegment
-    { sfUri   :: ! URI   -- ^ the URI where this segment can be fetched
-    , sfsData :: ! Bool  -- ^ True if this is a data block, false if it's a check block
-    }
-    deriving ( Show )
 
 getSplitFileSegment
   :: Maybe (Key, Word8)    -- ^ maybe common (decryption key, algorithm)
@@ -137,13 +130,7 @@ getSplitFileSegment common isData =
       return $! SplitFileSegment (CHK l c e []) isData
 
 data RedirectTarget
-  = SplitFile
-    { sfCompression    :: CompressionCodec   -- ^ the compression codec used by this splitfile
-    , sfCompressedSize :: Word64             -- ^ size of compressed data, equals original size if not compressed
-    , sfOriginalSize   :: Word64             -- ^ size of original data before compression was applied
-    , sfSegments       :: [SplitFileSegment] -- ^ the segments this split consists of
-    , sfMime           :: Maybe Mime         -- ^ MIME type of the target data
-    }
+  = RedirectSplitFile SplitFile
   | RedirectKey
     { rkMime :: Maybe Mime
     , rkUri  :: URI
@@ -213,7 +200,7 @@ getSplitFile v flags mkey cryptoAlgo = do
       dataBlocks  <- replicateM (fromIntegral splitfileBlocks)      $ getSplitFileSegment gsfsParams True
       checkBlocks' <- replicateM (fromIntegral splitfileCheckBlocks) $ getSplitFileSegment gsfsParams False
       
-      return $! SplitFile ccodec dlen olen (dataBlocks ++ checkBlocks') mime
+      return $! RedirectSplitFile $ SplitFile ccodec dlen olen (dataBlocks ++ checkBlocks') mime
       
     x -> fail $ "unknown splitfile algo " ++ show x
 
@@ -233,7 +220,7 @@ data Metadata
     }
   | ArchiveManifest
     { amTarget      :: RedirectTarget
-    , amType        :: ArchiveManifestType
+    , amType        :: ArchiveType
     , amHashes      :: [(HashType, BS.ByteString)]
     , amCompCodec   :: CompressionCodec
     }
@@ -281,8 +268,6 @@ getSymbolicShortlink = do
   tgt <- getText
   return $ SymbolicShortlink tgt
 
-data ArchiveManifestType = ZIP | TAR deriving ( Eq, Show )
-
 data TopBlock = TopBlock
                 { topSize           :: Word64
                 , topCompressedSize :: Word64
@@ -302,7 +287,7 @@ getArchiveManifest v = do
   (hashes, target, (Just atype)) <- getSimpleRedirect' v flags True
   return $ ArchiveManifest target atype hashes None
 
-getArchiveManifestType :: Get ArchiveManifestType
+getArchiveManifestType :: Get ArchiveType
 getArchiveManifestType = do
   tw <- getWord16be
   case tw of
@@ -356,7 +341,7 @@ getSimpleRedirect v = do
   (hashes, target, _) <- getSimpleRedirect' v flags False
   return $! SimpleRedirect hashes target 
 
-getSimpleRedirect' :: Version -> Word16 -> Bool -> Get ([(HashType, BS.ByteString)], RedirectTarget, Maybe ArchiveManifestType)
+getSimpleRedirect' :: Version -> Word16 -> Bool -> Get ([(HashType, BS.ByteString)], RedirectTarget, Maybe ArchiveType)
 getSimpleRedirect' v flags isArchive = do
   hashes <- if flagSet flags (flagBit Hashes)
     then getHashes 

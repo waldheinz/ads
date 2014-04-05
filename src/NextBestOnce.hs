@@ -10,8 +10,6 @@ module NextBestOnce (
 import Control.Applicative ( (<$>), (<*>) )
 import Control.Concurrent.STM
 import Data.Binary
-import Data.IntMap (IntMap)
-import qualified Data.IntMap as IntMap
 import Data.List ( minimumBy )
 
 class (Eq i, Show i) => Location i where

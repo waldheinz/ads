@@ -116,3 +116,4 @@ getSsk fn dr = do
           return $ case md of
             Nothing -> Left "timeout waiting for companion"
             Just d  -> Right d
+

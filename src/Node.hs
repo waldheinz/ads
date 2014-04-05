@@ -3,7 +3,9 @@
 
 module Node (
   -- * our node
-  Node, mkNode, requestChk, requestSsk,
+  Node, mkNode,
+--  requestChk, requestSsk,
+  requestNodeData,
   
   -- * peers
   ConnectFunction, initPeers,
@@ -35,6 +37,7 @@ import qualified Freenet as FN
 import qualified Freenet.Chk as FN
 import qualified Freenet.Ssk as FN
 import qualified Freenet.Types as FN
+import qualified Freenet.URI as FN
 import Message as MSG
 import qualified NextBestOnce as NBO
 import Types
@@ -339,3 +342,31 @@ runPeerNode node (src, sink) expected = do
       x       -> error $ show x
         
   C.addCleanup (\_ -> killThread tid) (C.sourceTBMQueue mq) C.$$ sink
+
+requestNodeData :: (Show a) => Node a -> FN.URI -> IO (Either T.Text BSL.ByteString)
+requestNodeData n (FN.CHK loc key extra _) = do
+  case FN.chkExtraCompression extra of
+    Left  e -> return $ Left $ "can't decompress CHK: " `T.append` e
+    Right c -> do
+      result <- requestChk n $ FN.ChkRequest loc (FN.chkExtraCrypto extra)
+  
+      case result of
+        Left e    -> return $ Left $ "obtaining CHK data block failed: " `T.append` e
+        Right blk -> case FN.decryptDataBlock blk key $ FN.chkExtraCrypto extra of
+          Left e  -> return $ Left $ "decrypting CHK data block failed: " `T.append` e
+          Right p -> FN.decompressChk c p
+
+requestNodeData n (FN.SSK pkh key extra dn _) = do
+  result <- requestSsk n $ FN.SskRequest pkh (FN.sskEncryptDocname key dn) (FN.sskExtraCrypto extra)
+
+  return $ case result of
+    Left e    -> Left e
+    Right blk -> FN.decryptDataBlock blk key $ FN.sskExtraCrypto extra
+
+requestNodeData n (FN.USK pkh key extra dn dr _) = do
+  result <- let dn' = dn `T.append` "-" `T.append` (T.pack $ show dr)
+            in requestSsk n $ FN.SskRequest pkh (FN.sskEncryptDocname key dn') (FN.sskExtraCrypto extra)
+
+  return $ case result of
+    Left e    -> Left e
+    Right blk -> FN.decryptDataBlock blk key $ FN.sskExtraCrypto extra
