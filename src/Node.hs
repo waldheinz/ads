@@ -14,7 +14,7 @@ module Node (
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
-import Control.Concurrent ( forkIO, killThread, myThreadId )
+import Control.Concurrent ( forkIO, killThread )
 import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
 import Control.Monad ( forever, unless, void, when )
@@ -29,7 +29,6 @@ import Data.List ( (\\) )
 import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
 import qualified Data.Text as T
-import Data.Word
 import System.FilePath ( (</>) )
 import System.Log.Logger
 
@@ -77,12 +76,14 @@ mkNode self fn = do
         { NBO.location          = nodeId $ peerNodeInfo self
         , NBO.neighbours        = readTVar $ peersConnected peers
         , NBO.neighbourLocation = \np -> nodeId $ peerNodeInfo $ nodePeer np
-        , NBO.popPred           = \msg -> readTVar msgMap >>= (\m -> return $ Map.lookup (rmId msg) m)
+        , NBO.popPred           = \msg -> messagePopPred node (rmId msg)
+        , NBO.addPred           = \msg n -> modifyTVar' msgMap $ Map.insert (rmId msg) n
         , NBO.routingInfo       = rmInfo
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
-        
-  let node = Node peers self midgen msgMap nbo fn incoming ac
+
+    node = Node peers self midgen msgMap nbo fn incoming ac
+    
   writeToStores node
   handleFreenetRequests node
   return node
@@ -120,7 +121,7 @@ requestChk n req = do
   local <- FN.getChk (nodeFreenet n) req
   case local of
     Right blk -> return $ Right blk
-    Left e    -> do
+    Left _    -> do
 --      logI $ "could not fetch data locally " ++ show e
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest req)
       bucket <- waitResponse n $ rmId msg
@@ -137,7 +138,7 @@ requestSsk n req = do
   local <- FN.getSsk (nodeFreenet n) req
   case local of
     Right blk -> return $ Right blk
-    Left e    -> do
+    Left _    -> do
 --      logI $ "could not fetch data locally " ++ show e
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest req)
       bucket <- waitResponse n $ rmId msg
@@ -159,19 +160,23 @@ sendRoutedMessage node msg prev = do
   mlog <- atomically $ do
     result <- NBO.route (nodeNbo node) prev msg
     case result of
-      NBO.Forward dest msg' -> enqMessage dest (Routed msg') >> return Nothing
-      NBO.Fail              -> return $ Just $ logI $ "message failed fatally: " ++ show msg
-
+      NBO.Forward dest msg'  -> enqMessage dest (Routed msg') >> return Nothing
+--      NBO.Backtrack des msg'
+      NBO.Fail               -> return $ Just $ logI $ "message failed fatally: " ++ show msg
+      
   case mlog of
     Nothing -> return ()
     Just l  -> l
+
+messagePopPred :: Node a -> MessageId -> STM (Maybe (PeerNode a))
+messagePopPred node mid = do
+  (tgt, m') <- Map.updateLookupWithKey (\_ _ -> Nothing) mid <$> readTVar (nodeActMsgs node)
+  writeTVar (nodeActMsgs node) m'
+  return tgt
   
 forwardResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
 forwardResponse node mid msg = do
-  mtgt <- atomically $ do
-    (tgt, m') <- Map.updateLookupWithKey (\_ _ -> Nothing) mid <$> readTVar (nodeActMsgs node)
-    writeTVar (nodeActMsgs node) m'
-    return tgt
+  mtgt <- atomically $ messagePopPred node mid
   
   case mtgt of
     Nothing -> logW $ "could not send response, message id unknown: " ++ show mid
