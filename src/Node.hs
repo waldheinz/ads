@@ -191,7 +191,6 @@ handleFreenetRequests node = do
   
   void $ forkIO $ forever $ do
     (pn, msg) <- atomically $ readTChan chan
-    print ("fnr", msg)
     
     void $ forkIO $ case msg of
       Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
