@@ -57,10 +57,10 @@ data Node a = Node
             { nodePeers    :: Peers a
             , nodeIdentity :: Peer a
             , nodeMidGen   :: MessageIdGen
-            , nodeActMsgs  :: TVar (Map.Map MessageId (PeerNode a, MessagePayload a, NBO.RoutingInfo NodeId)) -- ^ messages we're currently routing
-            , nodeNbo      :: NBO.Node NodeId (RoutedMessage a) (PeerNode a)      -- ^ our NBO identity for routing
-            , nodeFreenet  :: FN.Freenet a                                        -- ^ our freenet compatibility layer
-            , nodeIncoming :: TChan (PeerNode a, Message a)                       -- ^ stream of incoming messages
+            , nodeActMsgs  :: TVar (Map.Map MessageId (PeerNode a))          -- ^ messages we're currently routing
+            , nodeNbo      :: NBO.Node NodeId (RoutedMessage a) (PeerNode a) -- ^ our NBO identity for routing
+            , nodeFreenet  :: FN.Freenet a                                   -- ^ our freenet compatibility layer
+            , nodeIncoming :: TChan (PeerNode a, Message a)                  -- ^ stream of incoming messages
             , nodeArchives :: FN.ArchiveCache
             }
 
@@ -73,18 +73,18 @@ mkNode self fn = do
   ac <- FN.mkArchiveCache 10
   
   let
-    fst' (a, _, _) = a
     nbo = NBO.Node
         { NBO.location          = nodeId $ peerNodeInfo self
         , NBO.neighbours        = readTVar $ peersConnected peers
         , NBO.neighbourLocation = \np -> nodeId $ peerNodeInfo $ nodePeer np
-        , NBO.popPred           = \msg -> readTVar msgMap >>= (\m -> return $ maybe Nothing (Just . fst') (Map.lookup (rmId msg) m))
+        , NBO.popPred           = \msg -> readTVar msgMap >>= (\m -> return $ Map.lookup (rmId msg) m)
         , NBO.routingInfo       = rmInfo
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
         
   let node = Node peers self midgen msgMap nbo fn incoming ac
   writeToStores node
+  handleFreenetRequests node
   return node
 
 waitResponse :: Node a -> MessageId -> IO (TMVar (Maybe (MessagePayload a)))
@@ -159,25 +159,23 @@ sendRoutedMessage node msg = do
   mlog <- atomically $ do
     result <- NBO.route (nodeNbo node) Nothing msg
     case result of
-      NBO.Forward dest msg -> enqMessage dest (Routed msg) >> return Nothing
+      NBO.Forward dest msg' -> enqMessage dest (Routed msg') >> return Nothing
       NBO.Fail             -> return $ Just $ logI $ "message failed fatally: " ++ show msg
 
   case mlog of
     Nothing -> return ()
     Just l  -> l
   
-sendResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
-sendResponse node mid msg = do
+forwardResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
+forwardResponse node mid msg = do
   mtgt <- atomically $ do
-    m <- readTVar $ nodeActMsgs node
-    case Map.lookup mid m of
-      Nothing -> return Nothing
-      Just t  -> return $ Just t
-
+    (tgt, m') <- Map.updateLookupWithKey (\_ _ -> Nothing) mid <$> readTVar (nodeActMsgs node)
+    writeTVar (nodeActMsgs node) m'
+    return tgt
+  
   case mtgt of
-    Nothing  -> logW $ "could not send response, message id unknown: " ++ show mid
-    Just (pn, _, _) -> do
-      atomically $ enqMessage pn $ Response mid msg
+    Nothing -> logW $ "could not send response, message id unknown: " ++ show mid
+    Just pn -> atomically $ enqMessage pn $ Response mid msg
 
 handleFreenetRequests :: Show a => Node a -> IO ()
 handleFreenetRequests node = do
@@ -202,8 +200,7 @@ handleFreenetRequests node = do
           Left _    -> sendRoutedMessage node rm -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
 
-      Response mid msg' -> do
-        return ()
+      Response mid msg' -> forwardResponse node mid msg'
 
       _ -> return ()
       
@@ -230,9 +227,9 @@ type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> I
 ----------------------------------------------------------------
 
 data Peers a = Peers
-               { peersConnected     :: TVar [PeerNode a]      -- ^ peers we're currently connected to
-               , peersConnecting    :: TVar [Peer a]          -- ^ peers we're currently trying to connect to
-               , peersKnown         :: TVar [Peer a]          -- ^ all peers we know about, includes above
+               { peersConnected     :: TVar [PeerNode a] -- ^ peers we're currently connected to
+               , peersConnecting    :: TVar [Peer a]     -- ^ peers we're currently trying to connect to
+               , peersKnown         :: TVar [Peer a]     -- ^ all peers we know about, includes above
                }
 
 mkPeers :: STM (Peers a)
@@ -267,7 +264,8 @@ removePeer :: Peers a -> PeerNode a -> STM ()
 removePeer p n = do
   modifyTVar' (peersConnecting p) $ filter (/= nodePeer n)
   modifyTVar' (peersConnected p)  $ filter (/= n)
-
+  -- TODO: remove this peer's messages from routing map
+  
 maintainConnections :: (Show a) => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
   -- we simply try to maintain a connection to all known peers for now
