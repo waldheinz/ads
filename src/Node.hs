@@ -160,9 +160,9 @@ sendRoutedMessage node msg prev = do
   mlog <- atomically $ do
     result <- NBO.route (nodeNbo node) prev msg
     case result of
-      NBO.Forward dest msg'  -> enqMessage dest (Routed msg') >> return Nothing
---      NBO.Backtrack des msg'
-      NBO.Fail               -> return $ Just $ logI $ "message failed fatally: " ++ show msg
+      NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> return Nothing
+      NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> return Nothing
+      NBO.Fail                -> return $ Just $ logI $ "message failed fatally: " ++ show msg
       
   case mlog of
     Nothing -> return ()
@@ -193,18 +193,19 @@ handleFreenetRequests node = do
     (pn, msg) <- atomically $ readTChan chan
 
     case msg of
-      Routed rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
+      Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
         local <- FN.getChk fn req
         case local of
           Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
 
-      Routed rm@(RoutedMessage (FreenetSskRequest req) mid _) -> do
+      Routed False rm@(RoutedMessage (FreenetSskRequest req) mid _) -> do
         local <- FN.getSsk fn req
         case local of
           Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
-
+          
+      Routed True rm    -> sendRoutedMessage node rm Nothing -- backtrack
       Response mid msg' -> forwardResponse node mid msg'
 
       _ -> return ()

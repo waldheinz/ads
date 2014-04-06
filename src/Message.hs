@@ -99,22 +99,24 @@ instance (Binary a) => Binary (MessagePayload a) where
 
 -- |
 -- a message which should be routed to another peer
-data Message a = Routed (RoutedMessage a)
+data Message a = Routed Bool (RoutedMessage a)        -- ^ is this a backtrack step? and the routed message
                | Response MessageId (MessagePayload a)
                | Direct (MessagePayload a)
                deriving (Show)
 
 instance Binary a => Binary (Message a) where
-  put (Routed msg)       = putHeader 1 >> put msg
-  put (Response mid msg) = putHeader 2 >> put mid >> put msg
-  put (Direct msg)       = putHeader 3 >> put msg
+  put (Routed False msg) = putHeader 1 >> put msg
+  put (Routed True  msg) = putHeader 2 >> put msg
+  put (Response mid msg) = putHeader 3 >> put mid >> put msg
+  put (Direct msg)       = putHeader 4 >> put msg
   
   get = do
     t <- getWord8
     case t of
-      1 -> Routed <$> get
-      2 -> Response <$> get <*> get
-      3 -> Direct <$> get
+      1 -> Routed False <$> get
+      2 -> Routed True  <$> get
+      3 -> Response <$> get <*> get
+      4 -> Direct <$> get
       x -> fail $ "unknown message type " ++ show x
 
 data RoutedMessage a = RoutedMessage
