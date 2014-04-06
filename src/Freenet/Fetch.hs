@@ -68,6 +68,13 @@ resolvePath _ _ (ArchiveInternalRedirect tgt _) (Just amap) = do
       logI $ "found " ++ (show tgt) ++ " in archive"
       return $ Right bs
 
+resolvePath fn ps (ArchiveMetadataRedirect tgt) (Just archive) = do
+  case Map.lookup (T.unpack tgt) archive of
+    Nothing -> return $ Left $ "could not locate metadata " `T.append` tgt `T.append` " in archive"
+    Just bs -> case parseMetadata bs of
+      Left e   -> return $ Left $ "error parsing metadata from archive: " `T.append` e
+      Right md -> resolvePath fn ps md (Just archive)
+
 -- follow simple redirects
 resolvePath fn ps (SimpleRedirect _ tgt) _ = do
   logI $ "following simple redirect to " ++ (show tgt) ++ " for " ++ show ps

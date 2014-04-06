@@ -26,6 +26,8 @@ import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 import qualified Data.Conduit.TQueue as C
 import Data.List ( (\\) )
+import Data.Hashable ( Hashable )
+import qualified Data.HashMap.Strict as HMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
 import qualified Data.Text as T
@@ -402,3 +404,37 @@ requestNodeData n (FN.USK pkh key extra dn dr _) = do
   return $ case result of
     Left e    -> Left e
     Right blk -> FN.decryptDataBlock blk key $ FN.sskExtraCrypto extra
+
+-------------------------------------------------------------------------------------------------
+-- Organizing data requests
+-------------------------------------------------------------------------------------------------
+
+data Delayed d = Delayed ! (TMVar d)
+
+data RequestManager r d = RequestManager
+                          { rmRequests :: TVar (HMap.HashMap r (Delayed d))
+                          , rmStartReq :: r -> IO ()
+                          }
+
+mkRequestManager
+  :: (r -> IO ())             -- ^ the operation which kicks of fetching data
+  -> STM (RequestManager r d)
+mkRequestManager sr = do
+  reqs <- newTVar HMap.empty
+  return $! RequestManager reqs sr
+
+request :: (Eq r, Hashable r) => RequestManager r d -> r -> IO (Delayed d)
+request rmgr req = do
+  (result, needStart) <- atomically $ do
+    rm <- readTVar (rmRequests rmgr)
+    case HMap.lookup req rm of
+      Just old -> return (old, False)   -- request is already running
+      Nothing  -> do                    -- make new Delayed
+        b <- newEmptyTMVar
+        let d = Delayed b
+        writeTVar (rmRequests rmgr) $ HMap.insert req d rm
+        return (d, True)
+
+  when needStart $ (rmStartReq rmgr) req
+  return result
+  
