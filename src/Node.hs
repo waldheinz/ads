@@ -124,7 +124,7 @@ requestChk n req = do
 --      logI $ "could not fetch data locally " ++ show e
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest req)
       bucket <- waitResponse n $ rmId msg
-      sendRoutedMessage n msg
+      sendRoutedMessage n msg Nothing
       result <- atomically $ takeTMVar bucket
       case result of
         Nothing   -> return $ Left "timeout waiting for response"
@@ -141,7 +141,7 @@ requestSsk n req = do
 --      logI $ "could not fetch data locally " ++ show e
       msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest req)
       bucket <- waitResponse n $ rmId msg
-      sendRoutedMessage n msg
+      sendRoutedMessage n msg Nothing
       result <- atomically $ takeTMVar bucket
       case result of
         Nothing   -> return $ Left "timeout waiting for response"
@@ -154,13 +154,13 @@ mkRoutedMessage node target msg = atomically $ do
   mid <- nextMessageId $ nodeMidGen node
   return $ RoutedMessage msg mid $ NBO.mkRoutingInfo target
 
-sendRoutedMessage :: Show a => Node a -> RoutedMessage a -> IO ()
-sendRoutedMessage node msg = do
+sendRoutedMessage :: Show a => Node a -> RoutedMessage a -> Maybe (PeerNode a) -> IO ()
+sendRoutedMessage node msg prev = do
   mlog <- atomically $ do
-    result <- NBO.route (nodeNbo node) Nothing msg
+    result <- NBO.route (nodeNbo node) prev msg
     case result of
       NBO.Forward dest msg' -> enqMessage dest (Routed msg') >> return Nothing
-      NBO.Fail             -> return $ Just $ logI $ "message failed fatally: " ++ show msg
+      NBO.Fail              -> return $ Just $ logI $ "message failed fatally: " ++ show msg
 
   case mlog of
     Nothing -> return ()
@@ -191,13 +191,13 @@ handleFreenetRequests node = do
       Routed rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
         local <- FN.getChk fn req
         case local of
-          Left _    -> sendRoutedMessage node rm -- pass on
+          Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
 
       Routed rm@(RoutedMessage (FreenetSskRequest req) mid _) -> do
         local <- FN.getSsk fn req
         case local of
-          Left _    -> sendRoutedMessage node rm -- pass on
+          Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
 
       Response mid msg' -> forwardResponse node mid msg'
