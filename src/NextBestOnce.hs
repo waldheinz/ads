@@ -60,13 +60,11 @@ instance (Show l) => Show (Node l m n) where
   show n = "Node {l=" ++ (show $ location n) ++ "}"
 
 data Result l m n = Fail          -- ^ we failed with this message
---                  | Success       -- ^ the message was dealt with
                   | Forward n m   -- ^ pass on to this peer
                   | Backtrack n m -- ^ 
 
 instance (Show l, Show m, Show n) => Show (Result l m n) where
   show Fail = "Fail"
---  show Success = "Success"
   show (Forward n m) = "Forward " ++ (show m) ++ " to " ++ show n
   show (Backtrack n m) = "Backtrack " ++ (show m) ++ " to " ++ show n
   

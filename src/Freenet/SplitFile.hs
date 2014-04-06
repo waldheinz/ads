@@ -6,6 +6,7 @@ module Freenet.SplitFile (
   fetchSplitFile
   ) where
 
+import Control.Concurrent.Async ( mapConcurrently )
 import Data.Word
 import qualified Data.ByteString.Lazy as BSL
 import Data.Either ( partitionEithers )
@@ -25,7 +26,6 @@ data SplitFileSegment
     }
     deriving ( Eq, Ord, Show )
 
-
 data SplitFile = SplitFile
                  { sfCompression    :: CompressionCodec   -- ^ the compression codec used by this splitfile
                  , sfCompressedSize :: Word64             -- ^ size of compressed data, equals original size if not compressed
@@ -39,7 +39,8 @@ logI m = infoM "freenet.splitfile" m
 
 fetchUris :: (UriFetch a) => a -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
 fetchUris fn uris = do
-  result <- sequence $ map (getUriData fn) uris
+--   result <- sequence $ map (getUriData fn) uris  --
+  result <- mapConcurrently (getUriData fn) uris
   return $ zip uris result
 
 fetchSplitFile :: (UriFetch a) => a -> SplitFile -> IO (Either T.Text BSL.ByteString)

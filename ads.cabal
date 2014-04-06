@@ -25,6 +25,7 @@ executable ads
   build-depends:
     base                 >=4.6 && <4.7,
     aeson                >= 0.7,
+    async                >= 2.0,
     base16-bytestring    >= 0.1,
     base64-bytestring    >= 1.0,
     binary               >= 0.5,
