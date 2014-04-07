@@ -60,7 +60,13 @@ fetchArchive fetch ac tgt tp = do
   
   when needStart $ void $ forkIO $ do
     arch <- fetchArchive' fetch tgt tp
-    atomically $ putTMVar (unProgress prog) arch
+    atomically $ do
+      putTMVar (unProgress prog) arch
+      -- drop failures from cache so they can be fetched again if the user dares
+      case arch of
+        Left _ -> modifyTVar' (acLru ac) $ \lru -> let (lru', _) = LRU.delete ak lru in lru'
+        _       -> return ()
+    
 
   atomically $ readTMVar (unProgress prog)
 
