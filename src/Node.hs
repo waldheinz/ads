@@ -94,7 +94,7 @@ handlePeerMessages node pn msg = do
   let
     fn = nodeFreenet node
     
-    route = case msg of
+    route = void $ forkIO $ case msg of
       Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
         local <- FN.getChk fn req
         case local of
@@ -112,7 +112,7 @@ handlePeerMessages node pn msg = do
 
       _ -> return ()
 
-    writeStores = void $ forkIO $ case msg of
+    writeStores = case msg of
       Response _ (FreenetChkBlock blk) -> do
         atomically $ offer blk (nodeChkRequests node)
         FN.offerChk (nodeFreenet node) blk
