@@ -417,7 +417,9 @@ request rmgr dr act = do
     key = FN.dataRequestLocation dr
     checkTimeout (Delayed d) to = orElse
       (isEmptyTMVar d >>= \e -> if e then retry else return ())
-      (readTVar to    >>= \t -> if t then putTMVar d Nothing else retry)
+      (readTVar to    >>= \t -> if t
+                                then putTMVar d Nothing >> modifyTVar' (rmRequests rmgr) (HMap.delete key)
+                                else retry)
                    
   (result, needStart) <- atomically $ do
     rm <- readTVar (rmRequests rmgr)
