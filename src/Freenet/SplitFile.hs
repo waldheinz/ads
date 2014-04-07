@@ -39,8 +39,7 @@ logI m = infoM "freenet.splitfile" m
 
 fetchUris :: (UriFetch a) => a -> [URI] -> IO [(URI, Either T.Text BSL.ByteString)]
 fetchUris fn uris = do
-  result <- sequence $ map (getUriData fn) uris  --
---  result <- mapConcurrently (getUriData fn) uris
+  result <- mapConcurrently (getUriData fn) uris
   return $ zip uris result
 
 fetchSplitFile :: (UriFetch a) => a -> SplitFile -> IO (Either T.Text BSL.ByteString)

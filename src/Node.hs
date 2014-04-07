@@ -26,7 +26,6 @@ import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 import qualified Data.Conduit.TQueue as C
 import Data.List ( (\\) )
-import Data.Hashable ( Hashable )
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
@@ -61,17 +60,19 @@ data Node a = Node
             , nodeActMsgs  :: TVar (Map.Map MessageId (PeerNode a))          -- ^ messages we're currently routing
             , nodeNbo      :: NBO.Node NodeId (RoutedMessage a) (PeerNode a) -- ^ our NBO identity for routing
             , nodeFreenet  :: FN.Freenet a                                   -- ^ our freenet compatibility layer
-            , nodeIncoming :: TChan (PeerNode a, Message a)                  -- ^ stream of incoming messages
             , nodeArchives :: FN.ArchiveCache
+            , nodeChkRequests :: RequestManager FN.ChkRequest FN.ChkBlock
+            , nodeSskRequests :: RequestManager FN.SskRequest FN.SskBlock
             }
 
 mkNode :: (Show a) => Peer a -> FN.Freenet a -> IO (Node a)
 mkNode self fn = do
-  peers <- atomically $ mkPeers
+  peers  <- atomically $ mkPeers
   midgen <- mkMessageIdGen
   msgMap <- newTVarIO Map.empty
-  incoming <- newBroadcastTChanIO
-  ac <- FN.mkArchiveCache 10
+  ac     <- FN.mkArchiveCache 10
+  chkRm  <- atomically $ mkRequestManager
+  sskRm  <- atomically $ mkRequestManager
   
   let
     nbo = NBO.Node
@@ -84,73 +85,50 @@ mkNode self fn = do
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
 
-    node = Node peers self midgen msgMap nbo fn incoming ac
-    
-  writeToStores node
-  handleFreenetRequests node
+    node = Node peers self midgen msgMap nbo fn ac chkRm sskRm
+
   return node
 
-waitResponse :: Node a -> MessageId -> IO (TMVar (Maybe (MessagePayload a)))
-waitResponse node mid = do
-  timeout <- registerDelay (30 * 1000 * 1000)
-  bucket  <- newEmptyTMVarIO
-  chan    <- atomically $ dupTChan (nodeIncoming node)
-
+handlePeerMessages :: Show a => Node a -> PeerNode a -> Message a -> IO ()
+handlePeerMessages node pn msg = do
   let
-    doWait = orElse
-      (readTChan chan   >>= checkResponse)
-      (readTVar timeout >>= \to -> if to then putTMVar bucket Nothing else retry)
+    fn = nodeFreenet node
     
-    checkResponse msg = case msg of
-      (_, (Response mid' rp)) -> if mid == mid' then (putTMVar bucket $ Just rp) else doWait
-      _                       -> doWait
+    route = case msg of
+      Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
+        local <- FN.getChk fn req
+        case local of
+          Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
+          Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
 
-  -- wait for data or timeout
-  void $ forkIO $ atomically $ doWait
-  return bucket
+      Routed False rm@(RoutedMessage (FreenetSskRequest req) mid _) -> do
+        local <- FN.getSsk fn req
+        case local of
+          Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
+          Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
+          
+      Routed True rm    -> sendRoutedMessage node rm Nothing -- backtrack
+      Response mid msg' -> forwardResponse node mid msg'
+
+      _ -> return ()
+
+    writeStores = void $ forkIO $ case msg of
+      Response _ (FreenetChkBlock blk) -> do
+        atomically $ offer blk (nodeChkRequests node)
+        FN.offerChk (nodeFreenet node) blk
+        
+      Response _ (FreenetSskBlock blk) -> do
+        atomically $ offer blk (nodeSskRequests node)
+        FN.offerSsk (nodeFreenet node) blk
+      _   -> return ()
+
+  
+  writeStores >> route
 
 -- |
 -- Turn a Freenet @Key@ into a @NodeId@ by repacking the 32 bytes.
 keyToTarget :: FN.Key -> NodeId
 keyToTarget key = mkNodeId' $ FN.unKey key
-
--- |
--- Handle a data request at node level. This means we first ask our Freenet layer
--- if it has the data in it's stores, and if this fails we route a message to our
--- peer nodes.
-requestChk :: (Show a) => Node a -> FN.ChkRequest -> IO (Either T.Text FN.ChkBlock)
-requestChk n req = do
-  local <- FN.getChk (nodeFreenet n) req
-  case local of
-    Right blk -> return $ Right blk
-    Left _    -> do
---      logI $ "could not fetch data locally " ++ show e
-      msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest req)
-      bucket <- waitResponse n $ rmId msg
-      sendRoutedMessage n msg Nothing
-      result <- atomically $ takeTMVar bucket
-      case result of
-        Nothing   -> return $ Left "timeout waiting for response"
-        Just resp -> case resp of
-          (FreenetChkBlock blk) -> return $ Right blk
-          x                     -> return $ Left $ "expected CHK block, but got: " `T.append` (T.pack $ show x)
-
-requestSsk :: (Show a) => Node a -> FN.SskRequest -> IO (Either T.Text FN.SskBlock)
-requestSsk n req = do
-  local <- FN.getSsk (nodeFreenet n) req
-  case local of
-    Right blk -> return $ Right blk
-    Left _    -> do
---      logI $ "could not fetch data locally " ++ show e
-      msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest req)
-      bucket <- waitResponse n $ rmId msg
-      sendRoutedMessage n msg Nothing
-      result <- atomically $ takeTMVar bucket
-      case result of
-        Nothing   -> return $ Left "timeout waiting for response"
-        Just resp -> case resp of
-          (FreenetSskBlock blk) -> return $ Right blk
-          x                     -> return $ Left $ "expected SSK block, but got: " `T.append` (T.pack $ show x)
 
 mkRoutedMessage :: Node a -> NodeId -> MessagePayload a -> IO (RoutedMessage a)
 mkRoutedMessage node target msg = atomically $ do
@@ -183,50 +161,6 @@ forwardResponse node mid msg = do
   case mtgt of
     Nothing -> logW $ "could not send response, message id unknown: " ++ show mid
     Just pn -> atomically $ enqMessage pn $ Response mid msg
-
-handleFreenetRequests :: Show a => Node a -> IO ()
-handleFreenetRequests node = do
-  chan <- atomically $ dupTChan $ nodeIncoming node
-
-  let
-    fn = nodeFreenet node
-  
-  void $ forkIO $ forever $ do
-    (pn, msg) <- atomically $ readTChan chan
-    
-    void $ forkIO $ case msg of
-      Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
-        local <- FN.getChk fn req
-        case local of
-          Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
-          Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
-
-      Routed False rm@(RoutedMessage (FreenetSskRequest req) mid _) -> do
-        local <- FN.getSsk fn req
-        case local of
-          Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
-          Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
-          
-      Routed True rm    -> sendRoutedMessage node rm Nothing -- backtrack
-      Response mid msg' -> forwardResponse node mid msg'
-
-      _ -> return ()
-      
--- |
--- Installs a incoming message handler which will offer all data blocks
--- coming along this node to the Freenet subsystem, which may then put
--- them in it's store(s) when it sees fit.
-writeToStores :: Show a => Node a -> IO ()
-writeToStores node = do
-  chan <- atomically $ dupTChan $ nodeIncoming node
-
-  void $ forkIO $ forever $ do
-    (_, msg) <- atomically $ readTChan chan
-
-    case msg of
-      Response _ (FreenetChkBlock blk) -> FN.offerChk (nodeFreenet node) blk
-      Response _ (FreenetSskBlock blk) -> FN.offerSsk (nodeFreenet node) blk
-      _                                -> return ()
 
 type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
 
@@ -368,7 +302,7 @@ runPeerNode node (src, sink) expected = do
           (\_ -> do
               logI $ "lost connection to " ++ (show $ peerNodeInfo $ nodePeer pn)
               atomically $ removePeer (nodePeers node) pn)
-          (C.mapM_ $ \m -> atomically $ writeTChan (nodeIncoming node) (pn, m))
+          (C.mapM_ $ handlePeerMessages node pn)
         
       x       -> error $ show x
         
@@ -382,59 +316,123 @@ requestNodeData n (FN.CHK loc key extra _) = do
   case FN.chkExtraCompression extra of
     Left  e -> return $ Left $ "can't decompress CHK: " `T.append` e
     Right c -> do
-      result <- requestChk n $ FN.ChkRequest loc (FN.chkExtraCrypto extra)
-  
-      case result of
-        Left e    -> return $ Left $ "obtaining CHK data block failed: " `T.append` e
-        Right blk -> case FN.decryptDataBlock blk key $ FN.chkExtraCrypto extra of
+      let
+        req = FN.ChkRequest loc (FN.chkExtraCrypto extra)
+        decrypt blk = case FN.decryptDataBlock blk key $ FN.chkExtraCrypto extra of
           Left e  -> return $ Left $ "decrypting CHK data block failed: " `T.append` e
           Right p -> FN.decompressChk c p
+ 
+      fromStore <- FN.getChk (nodeFreenet n) req
 
+      case fromStore of
+        Right blk -> decrypt blk
+        Left _    -> do
+          d <- request (nodeChkRequests n) req $ \r -> do
+            msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest r)
+            sendRoutedMessage n msg Nothing
+          
+          result <- atomically $ waitDelayed d
+          
+          case result of
+            Nothing  -> return $ Left $ "timeout waiting for CHK data"
+            Just blk -> decrypt blk
+            
 requestNodeData n (FN.SSK pkh key extra dn _) = do
-  result <- requestSsk n $ FN.SskRequest pkh (FN.sskEncryptDocname key dn) (FN.sskExtraCrypto extra)
+  let
+    req = FN.SskRequest pkh (FN.sskEncryptDocname key dn) (FN.sskExtraCrypto extra)
+    decrypt blk = FN.decryptDataBlock blk key $ FN.sskExtraCrypto extra
+        
+  fromStore <- FN.getSsk (nodeFreenet n) req
 
-  return $ case result of
-    Left e    -> Left e
-    Right blk -> FN.decryptDataBlock blk key $ FN.sskExtraCrypto extra
+  case fromStore of
+    Right blk -> return $ decrypt blk
+    Left _    -> do
+      d <- request (nodeSskRequests n) req $ \r -> do
+        msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest r)
+        sendRoutedMessage n msg Nothing
+          
+      result <- atomically $ waitDelayed d
+          
+      case result of
+        Nothing  -> return $ Left $ "timeout waiting for SSK data"
+        Just blk -> return $ decrypt blk
 
 requestNodeData n (FN.USK pkh key extra dn dr _) = do
-  result <- let dn' = dn `T.append` "-" `T.append` (T.pack $ show dr)
-            in requestSsk n $ FN.SskRequest pkh (FN.sskEncryptDocname key dn') (FN.sskExtraCrypto extra)
+  let
+    dn' = dn `T.append` "-" `T.append` (T.pack $ show dr)
+    req = FN.SskRequest pkh (FN.sskEncryptDocname key dn') (FN.sskExtraCrypto extra)
+    decrypt blk = FN.decryptDataBlock blk key $ FN.sskExtraCrypto extra
+        
+  fromStore <- FN.getSsk (nodeFreenet n) req
 
-  return $ case result of
-    Left e    -> Left e
-    Right blk -> FN.decryptDataBlock blk key $ FN.sskExtraCrypto extra
+  case fromStore of
+    Right blk -> return $ decrypt blk
+    Left _    -> do
+      d <- request (nodeSskRequests n) req $ \r -> do
+        msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest r)
+        sendRoutedMessage n msg Nothing
+          
+      result <- atomically $ waitDelayed d
+          
+      case result of
+        Nothing  -> return $ Left $ "timeout waiting for SSK data"
+        Just blk -> return $ decrypt blk
 
 -------------------------------------------------------------------------------------------------
 -- Organizing data requests
 -------------------------------------------------------------------------------------------------
 
-data Delayed d = Delayed ! (TMVar d)
+data Delayed d = Delayed ! (TMVar (Maybe d))
+
+waitDelayed :: Delayed d -> STM (Maybe d)
+waitDelayed (Delayed d) = readTMVar d
 
 data RequestManager r d = RequestManager
-                          { rmRequests :: TVar (HMap.HashMap r (Delayed d))
-                          , rmStartReq :: r -> IO ()
-                          }
+                        { rmRequests :: TVar (HMap.HashMap FN.Key (Delayed d))
+                        , rmTimeout  :: Int
+                        }
 
-mkRequestManager
-  :: (r -> IO ())             -- ^ the operation which kicks of fetching data
-  -> STM (RequestManager r d)
-mkRequestManager sr = do
+mkRequestManager :: STM (RequestManager r d)
+mkRequestManager = do
   reqs <- newTVar HMap.empty
-  return $! RequestManager reqs sr
+  return $! RequestManager reqs (20 * 1000 * 1000)
 
-request :: (Eq r, Hashable r) => RequestManager r d -> r -> IO (Delayed d)
-request rmgr req = do
+offer :: (FN.DataBlock d) => d -> RequestManager r d -> STM ()
+offer db rmgr = do
+
+  let
+    key = FN.dataBlockLocation db
+  
+  rm <- readTVar (rmRequests rmgr)
+
+  case HMap.lookup key rm of
+    Nothing          -> return ()
+    Just (Delayed d) -> do
+      putTMVar d (Just db)
+      writeTVar (rmRequests rmgr) $ HMap.delete key rm
+
+request :: (FN.DataRequest r) => RequestManager r d -> r -> (r -> IO ()) -> IO (Delayed d)
+request rmgr dr act = do
+  let
+    key = FN.dataRequestLocation dr
+    checkTimeout (Delayed d) to = orElse
+      (isEmptyTMVar d >>= \e -> if e then retry else return ())
+      (readTVar to    >>= \t -> if t then putTMVar d Nothing else retry)
+                   
   (result, needStart) <- atomically $ do
     rm <- readTVar (rmRequests rmgr)
-    case HMap.lookup req rm of
+    case HMap.lookup key rm of
       Just old -> return (old, False)   -- request is already running
       Nothing  -> do                    -- make new Delayed
         b <- newEmptyTMVar
         let d = Delayed b
-        writeTVar (rmRequests rmgr) $ HMap.insert req d rm
+        writeTVar (rmRequests rmgr) $ HMap.insert key d rm
         return (d, True)
-
-  when needStart $ (rmStartReq rmgr) req
+  
+  when needStart $ do
+    to <- registerDelay $ rmTimeout rmgr
+    void $ forkIO $ atomically $ checkTimeout result to
+    act dr
+    
   return result
   
