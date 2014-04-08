@@ -30,7 +30,8 @@ import qualified Data.HashMap.Strict as HMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
 import qualified Data.Text as T
-import Data.Time.Clock ( UTCTime, getCurrentTime )
+--import Data.Time.Clock ( diff  )
+import Data.Time.Clock.POSIX ( POSIXTime, getPOSIXTime )
 import System.FilePath ( (</>) )
 import System.Log.Logger
 
@@ -285,7 +286,7 @@ data PeerNode a
   = PeerNode
     { pnPeer        :: Peer a               -- ^ the peer
     , pnQueue       :: TBMQueue (Message a) -- ^ outgoing message queue
-    , pnLastMessage :: TVar UTCTime         -- ^ when the last message was received
+    , pnLastMessage :: TVar POSIXTime       -- ^ when the last message was received
     }
     
 instance (Show a) => Show (PeerNode a) where
@@ -297,6 +298,18 @@ instance Eq (PeerNode a) where
 -- | puts a message on the Node's outgoing message queue       
 enqMessage :: PeerNode a -> Message a -> STM ()
 enqMessage n m = writeTBMQueue (pnQueue n) m
+
+{-
+doPing :: PeerNode a -> IO ()
+doPing pn = do
+  to <- registerDelay $ 10 * 1000 * 1000
+  now <- getPOSIXTime
+  
+  atomically $ orElse
+    (readTVar (pnLastMessage pn) >>= \last -> if (now - last < 20) then retry else return ())
+    (readTVar to >>= \timeout -> if timeout then enqMessage pn (Direct Ping) else retry)
+
+-}
 
 ------------------------------------------------------------------------------
 -- Handshake
@@ -322,8 +335,7 @@ runPeerNode node (src, sink) expected = do
           Nothing -> return ()
           Just e -> when (e /= p) $ error "node identity mismatch"
 
-        now <- liftIO $ getCurrentTime >>= newTVarIO
-        let pn = PeerNode p mq now
+        pn <- liftIO $ getPOSIXTime >>= newTVarIO >>= \now -> return (PeerNode p mq now)
         
         liftIO $ do
           logI $ "got hello from " ++ show pn
@@ -338,7 +350,7 @@ runPeerNode node (src, sink) expected = do
               logI $ "lost connection to " ++ (show $ peerNodeInfo $ pnPeer pn)
               atomically $ removePeerNode (nodePeers node) pn)
           (C.mapM_ $ \m -> do
-              getCurrentTime >>= atomically . (writeTVar $ pnLastMessage pn)
+              getPOSIXTime >>= atomically . (writeTVar $ pnLastMessage pn)
               handlePeerMessages node pn m)
         
       x       -> error $ show x
