@@ -21,6 +21,7 @@ import Data.Binary
 import Data.Conduit
 import Data.Conduit.Network
 import Data.Conduit.Serialization.Binary
+import Data.List ( nub )
 import qualified Data.Vector as V
 import System.IO.Error ( catchIOError )
 
@@ -31,7 +32,7 @@ import Types
 logI :: String -> IO ()
 logI m = infoM "net" m
 
-data TcpAddress = TcpAddress String Int deriving ( Show )
+data TcpAddress = TcpAddress String Int deriving ( Eq, Show )
 
 instance Binary TcpAddress where
   put (TcpAddress h p) = put h >> put p
@@ -45,7 +46,7 @@ instance FromJSON TcpAddress where
   
 -- |
 -- The type of addresses TCP/IP networking deals with
-data TcpAddressInfo = AI [TcpAddress] deriving ( Show ) -- a list of (hostname, port)
+data TcpAddressInfo = AI [TcpAddress] deriving ( Eq, Show ) -- a list of (hostname, port)
 
 instance Binary TcpAddressInfo where
   put (AI as) = put as
@@ -54,6 +55,9 @@ instance Binary TcpAddressInfo where
 instance FromJSON TcpAddressInfo where
   parseJSON (Array as) = AI <$> (mapM parseJSON $ V.toList as)
   parseJSON _ = mzero
+
+instance PeerAddress TcpAddressInfo where
+  mergeAddress (AI l1) (AI l2) = AI $ nub $ l1 ++ l2
   
 -- |
 -- listens on the configured addresses and accepts incomping peer connections

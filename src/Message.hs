@@ -70,6 +70,8 @@ nextMessageId = readTBQueue . unMessageIdGen
 data MessagePayload a
      = Hello (Peer a)
      | Ping
+     | GetPeerList                      -- ^ request for getting some peers which we might connect to
+     | PeerList [Peer a]                -- ^ response to @GetPeers@ request
      | FreenetChkRequest FN.ChkRequest
      | FreenetChkBlock   FN.ChkBlock
      | FreenetSskRequest FN.SskRequest
@@ -79,10 +81,12 @@ data MessagePayload a
 instance (Binary a) => Binary (MessagePayload a) where
   put (Hello peer)           = putHeader 1 >> put peer
   put Ping                   = putHeader 2
-  put (FreenetChkRequest dr) = putHeader 3 >> put dr
-  put (FreenetChkBlock blk)  = putHeader 4 >> put blk
-  put (FreenetSskRequest dr) = putHeader 5 >> put dr
-  put (FreenetSskBlock blk)  = putHeader 6 >> put blk
+  put GetPeerList            = putHeader 3
+  put (PeerList ps)          = putHeader 4 >> put ps
+  put (FreenetChkRequest dr) = putHeader 5 >> put dr
+  put (FreenetChkBlock blk)  = putHeader 6 >> put blk
+  put (FreenetSskRequest dr) = putHeader 7 >> put dr
+  put (FreenetSskBlock blk)  = putHeader 8 >> put blk
   
   get = do
     t <- getWord8
@@ -90,10 +94,12 @@ instance (Binary a) => Binary (MessagePayload a) where
     case t of
       1 -> Hello <$> get
       2 -> return Ping
-      3 -> FreenetChkRequest <$> get
-      4 -> FreenetChkBlock <$> get
-      5 -> FreenetSskRequest <$> get
-      6 -> FreenetSskBlock <$> get
+      3 -> return GetPeerList
+      4 -> PeerList <$> get
+      5 -> FreenetChkRequest <$> get
+      6 -> FreenetChkBlock <$> get
+      7 -> FreenetSskRequest <$> get
+      8 -> FreenetSskBlock <$> get
       _ -> fail $ "unknown message type " ++ show t
 
 

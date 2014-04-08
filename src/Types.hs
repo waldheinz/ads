@@ -4,7 +4,7 @@
 module Types (
   NodeId, mkNodeId', NodeInfo(..),
   
-  Peer(..), mkPeer,
+  PeerAddress(..), Peer(..), mkPeer,
   UriFetch(..)
   ) where
 
@@ -79,6 +79,9 @@ instance FromJSON NodeInfo where
 -- Peers / Peer Nodes
 ----------------------------------------------------------------
 
+class (FromJSON a, Show a) => PeerAddress a where
+  mergeAddress :: a -> a -> a
+
 data Peer a = Peer
             { peerNodeInfo :: NodeInfo        -- ^ the static node info of this peer
             , peerAddress  :: a               -- ^ where this peer might be connected
@@ -97,7 +100,7 @@ instance (Binary a) => Binary (Peer a) where
   put (Peer ni addr) = put ni >> put addr
   get = Peer <$> get <*> get
 
-mkPeer :: NodeInfo -> a -> Peer a
+mkPeer :: PeerAddress a => NodeInfo -> a -> Peer a
 mkPeer ni addr = Peer ni addr
 
 -----------------------------------------------------------------

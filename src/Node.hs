@@ -25,7 +25,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 import qualified Data.Conduit.TQueue as C
-import Data.List ( (\\) )
+import Data.List ( (\\), find )
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
@@ -89,7 +89,14 @@ mkNode self fn = do
 
   return node
 
-handlePeerMessages :: Show a => Node a -> PeerNode a -> Message a -> IO ()
+handlePeerMessages :: PeerAddress a => Node a -> PeerNode a -> Message a -> IO ()
+
+handlePeerMessages node pn (Direct GetPeerList) =
+  atomically $ readTVar (peersKnown $ nodePeers node) >>= \ps -> enqMessage pn $ Direct $ PeerList ps
+                                                                 
+handlePeerMessages node _  (Direct (PeerList ps)) =
+  atomically $ mapM_ (mergePeer (nodePeers node)) ps
+  
 handlePeerMessages node pn msg = do
   let
     fn = nodeFreenet node
@@ -121,8 +128,7 @@ handlePeerMessages node pn msg = do
         atomically $ offer blk (nodeSskRequests node)
         FN.offerSsk (nodeFreenet node) blk
       _   -> return ()
-
-  
+    
   writeStores >> route
 
 -- |
@@ -177,9 +183,9 @@ data Peers a = Peers
 mkPeers :: STM (Peers a)
 mkPeers = Peers <$> newTVar [] <*> newTVar [] <*> newTVar []
 
-initPeers :: (Show n, FromJSON n)
-             => Node n                       -- ^ our node
-             -> ConnectFunction n
+initPeers :: (PeerAddress a)
+             => Node a                       -- ^ our node
+             -> ConnectFunction a
              -> FilePath
              -> IO ()
 initPeers node connect dataDir = do
@@ -197,18 +203,40 @@ initPeers node connect dataDir = do
       logI ("got " ++ (show $ length peers) ++ " peers")
       atomically $ writeTVar (peersKnown $ nodePeers node) peers
 
-addPeer :: Peers a -> PeerNode a -> STM ()
-addPeer p n = do
+-- |
+-- Merges the information about some peer with our set of known peers,
+-- adding new ones or just updating addresses of the ones we already
+-- know about.
+mergePeer :: PeerAddress a => Peers a -> Peer a -> STM ()
+mergePeer ps p = do
+  known <- readTVar $ peersKnown ps
+
+  let known' = case find (== p) known of
+        Nothing -> (p:known)
+        Just p' -> (p { peerAddress = mergeAddress (peerAddress p) (peerAddress p') } : filter (==p) known)
+
+  writeTVar (peersKnown ps) (known')
+
+-- |
+-- Adds a peer to the set of connected peers. It is now a partner
+-- for message exchange, instead of just someone we know of.
+addPeerNode :: PeerAddress a => Peers a -> PeerNode a -> STM ()
+addPeerNode p n = do
+  mergePeer p (nodePeer n)
   modifyTVar' (peersConnecting p) $ filter (/= nodePeer n)
   modifyTVar' (peersConnected p) ((:) n)
-  
-removePeer :: Peers a -> PeerNode a -> STM ()
-removePeer p n = do
+
+-- |
+-- Removed a peer from the set of connected peers, when we decided
+-- we don't want to talk to this peer any more, or the connection
+-- was lost.
+removePeerNode :: Peers a -> PeerNode a -> STM ()
+removePeerNode p n = do
   modifyTVar' (peersConnecting p) $ filter (/= nodePeer n)
   modifyTVar' (peersConnected p)  $ filter (/= n)
   -- TODO: remove this peer's messages from routing map
   
-maintainConnections :: (Show a) => Node a -> ConnectFunction a -> IO ()
+maintainConnections :: PeerAddress a => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
   -- we simply try to maintain a connection to all known peers for now
   delay <- registerDelay $ 2 * 1000 * 1000 -- limit outgoing connection rate
@@ -270,7 +298,7 @@ enqMessage n m = writeTBMQueue (nQueue n) m
 
 -- ^ handle a node that is currently connected to us
 runPeerNode
-  :: (Show a)
+  :: (PeerAddress a)
   => Node a
   -> MessageIO a    -- ^ the (source, sink) pair to talk to the peer
   -> Maybe (Peer a)
@@ -296,12 +324,13 @@ runPeerNode node (src, sink) expected = do
           
           atomically $ do
             unless (isJust expected) $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
-            addPeer (nodePeers node) pn
+            writeTBMQueue mq (Direct GetPeerList)
+            addPeerNode (nodePeers node) pn
             
         C.addCleanup
           (\_ -> do
               logI $ "lost connection to " ++ (show $ peerNodeInfo $ nodePeer pn)
-              atomically $ removePeer (nodePeers node) pn)
+              atomically $ removePeerNode (nodePeers node) pn)
           (C.mapM_ $ handlePeerMessages node pn)
         
       x       -> error $ show x
