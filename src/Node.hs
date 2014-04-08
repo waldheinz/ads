@@ -214,7 +214,7 @@ mergePeer node p = unless (p == nodeIdentity node) $ do
 
   let known' = case find (== p) known of
         Nothing -> (p:known)
-        Just p' -> (p { peerAddress = mergeAddress (peerAddress p) (peerAddress p') } : filter (==p) known)
+        Just p' -> (p { peerAddress = mergeAddress (peerAddress p) (peerAddress p') } : filter (/=p) known)
 
   writeTVar (peersKnown ps) (known')
 
@@ -260,7 +260,7 @@ maintainConnections node connect = forever $ do
       then retry
       else do
         let result' = head result
-        modifyTVar (peersConnecting peers) ((:) result')
+        modifyTVar' (peersConnecting peers) ((:) result')
         return result'
 
   logI $ "connecting to " ++ show shouldConnect
@@ -268,7 +268,7 @@ maintainConnections node connect = forever $ do
     case cresult of
       Left e -> do
         logW $ "error connecting: " ++ e ++ " on " ++ show shouldConnect
-        atomically $ modifyTVar (peersConnecting peers) (filter $ (/= shouldConnect))
+        atomically $ modifyTVar' (peersConnecting peers) (filter $ (/= shouldConnect))
       
       Right msgio -> do
         logI $ "connected to " ++ show shouldConnect
