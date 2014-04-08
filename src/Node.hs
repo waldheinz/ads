@@ -95,7 +95,7 @@ handlePeerMessages node pn (Direct GetPeerList) =
   atomically $ readTVar (peersKnown $ nodePeers node) >>= \ps -> enqMessage pn $ Direct $ PeerList ps
                                                                  
 handlePeerMessages node _  (Direct (PeerList ps)) =
-  atomically $ mapM_ (mergePeer (nodePeers node)) ps
+  atomically $ mapM_ (mergePeer node) ps
   
 handlePeerMessages node pn msg = do
   let
@@ -207,8 +207,9 @@ initPeers node connect dataDir = do
 -- Merges the information about some peer with our set of known peers,
 -- adding new ones or just updating addresses of the ones we already
 -- know about.
-mergePeer :: PeerAddress a => Peers a -> Peer a -> STM ()
-mergePeer ps p = do
+mergePeer :: PeerAddress a => Node a -> Peer a -> STM ()
+mergePeer node p = unless (p == nodeIdentity node) $ do
+  let ps = nodePeers node
   known <- readTVar $ peersKnown ps
 
   let known' = case find (== p) known of
@@ -220,11 +221,12 @@ mergePeer ps p = do
 -- |
 -- Adds a peer to the set of connected peers. It is now a partner
 -- for message exchange, instead of just someone we know of.
-addPeerNode :: PeerAddress a => Peers a -> PeerNode a -> STM ()
-addPeerNode p n = do
-  mergePeer p (nodePeer n)
-  modifyTVar' (peersConnecting p) $ filter (/= nodePeer n)
-  modifyTVar' (peersConnected p) ((:) n)
+addPeerNode :: PeerAddress a => Node a -> PeerNode a -> STM ()
+addPeerNode node pn = do
+  let ps = nodePeers node
+  mergePeer node (nodePeer pn)
+  modifyTVar' (peersConnecting ps) $ filter (/= nodePeer pn)
+  modifyTVar' (peersConnected ps) ((:) pn)
 
 -- |
 -- Removed a peer from the set of connected peers, when we decided
@@ -325,7 +327,7 @@ runPeerNode node (src, sink) expected = do
           atomically $ do
             unless (isJust expected) $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
             writeTBMQueue mq (Direct GetPeerList)
-            addPeerNode (nodePeers node) pn
+            addPeerNode node pn
             
         C.addCleanup
           (\_ -> do
