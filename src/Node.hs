@@ -78,7 +78,7 @@ mkNode self fn = do
     nbo = NBO.Node
         { NBO.location          = nodeId $ peerNodeInfo self
         , NBO.neighbours        = readTVar $ peersConnected peers
-        , NBO.neighbourLocation = \np -> nodeId $ peerNodeInfo $ nodePeer np
+        , NBO.neighbourLocation = \np -> nodeId $ peerNodeInfo $ pnPeer np
         , NBO.popPred           = \msg -> messagePopPred node (rmId msg)
         , NBO.addPred           = \msg n -> modifyTVar' msgMap $ Map.insert (rmId msg) n
         , NBO.routingInfo       = rmInfo
@@ -224,8 +224,8 @@ mergePeer node p = unless (p == nodeIdentity node) $ do
 addPeerNode :: PeerAddress a => Node a -> PeerNode a -> STM ()
 addPeerNode node pn = do
   let ps = nodePeers node
-  mergePeer node (nodePeer pn)
-  modifyTVar' (peersConnecting ps) $ filter (/= nodePeer pn)
+  mergePeer node (pnPeer pn)
+  modifyTVar' (peersConnecting ps) $ filter (/= pnPeer pn)
   modifyTVar' (peersConnected ps) ((:) pn)
 
 -- |
@@ -234,7 +234,7 @@ addPeerNode node pn = do
 -- was lost.
 removePeerNode :: Peers a -> PeerNode a -> STM ()
 removePeerNode p n = do
-  modifyTVar' (peersConnecting p) $ filter (/= nodePeer n)
+  modifyTVar' (peersConnecting p) $ filter (/= pnPeer n)
   modifyTVar' (peersConnected p)  $ filter (/= n)
   -- TODO: remove this peer's messages from routing map
   
@@ -254,7 +254,7 @@ maintainConnections node connect = forever $ do
     connected <- readTVar $ peersConnected peers
   
     let
-      result = (known \\ cting) \\ (map nodePeer connected)
+      result = (known \\ cting) \\ (map pnPeer connected)
 
     if null result
       then retry
@@ -278,21 +278,23 @@ maintainConnections node connect = forever $ do
 -- Peer Nodes
 -------------------------------------------------------------------------
 
+-- |
+-- A @PeerNode@ is a @Peer@ we're currently connected to.
 data PeerNode a
   = PeerNode
-    { nodePeer :: Peer a
-    , nQueue   :: TBMQueue (Message a) -- ^ outgoing message queue to this node
+    { pnPeer  :: Peer a               -- ^ the peer
+    , pnQueue :: TBMQueue (Message a) -- ^ outgoing message queue
     }
-             
+    
 instance (Show a) => Show (PeerNode a) where
-  show n = "Node {peer = " ++ show (nodePeer n) ++ " }"
+  show n = "Node {peer = " ++ show (pnPeer n) ++ " }"
 
 instance Eq (PeerNode a) where
   (PeerNode p1 _) == (PeerNode p2 _) = p1 == p2
 
 -- | puts a message on the Node's outgoing message queue       
 enqMessage :: PeerNode a -> Message a -> STM ()
-enqMessage n m = writeTBMQueue (nQueue n) m
+enqMessage n m = writeTBMQueue (pnQueue n) m
 
 ------------------------------------------------------------------------------
 -- Handshake
@@ -308,8 +310,7 @@ runPeerNode
 runPeerNode node (src, sink) expected = do
   mq <- newTBMQueueIO 50
   
-  -- enqueue the obligatory Hello message, if this is an
-  -- outgoing connection
+  -- enqueue the obligatory Hello message, if this is an outgoing connection
   when (isJust expected) $ atomically $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
   
   tid <- forkIO $ src C.$$ C.awaitForever $ \msg -> do
@@ -331,7 +332,7 @@ runPeerNode node (src, sink) expected = do
             
         C.addCleanup
           (\_ -> do
-              logI $ "lost connection to " ++ (show $ peerNodeInfo $ nodePeer pn)
+              logI $ "lost connection to " ++ (show $ peerNodeInfo $ pnPeer pn)
               atomically $ removePeerNode (nodePeers node) pn)
           (C.mapM_ $ handlePeerMessages node pn)
         
