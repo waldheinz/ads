@@ -54,6 +54,7 @@ executable ads
     stm-conduit          >= 2.2,
     tar                  >= 0.4,
     text                 >= 0.11,
+    time                 >= 1.1,
     transformers         >= 0.3,
     unix                 >= 2.6,
     unordered-containers >= 0.2,

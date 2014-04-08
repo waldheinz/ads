@@ -30,6 +30,7 @@ import qualified Data.HashMap.Strict as HMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
 import qualified Data.Text as T
+import Data.Time.Clock ( UTCTime, getCurrentTime )
 import System.FilePath ( (</>) )
 import System.Log.Logger
 
@@ -282,15 +283,16 @@ maintainConnections node connect = forever $ do
 -- A @PeerNode@ is a @Peer@ we're currently connected to.
 data PeerNode a
   = PeerNode
-    { pnPeer  :: Peer a               -- ^ the peer
-    , pnQueue :: TBMQueue (Message a) -- ^ outgoing message queue
+    { pnPeer        :: Peer a               -- ^ the peer
+    , pnQueue       :: TBMQueue (Message a) -- ^ outgoing message queue
+    , pnLastMessage :: TVar UTCTime         -- ^ when the last message was received
     }
     
 instance (Show a) => Show (PeerNode a) where
   show n = "Node {peer = " ++ show (pnPeer n) ++ " }"
 
 instance Eq (PeerNode a) where
-  (PeerNode p1 _) == (PeerNode p2 _) = p1 == p2
+  (PeerNode p1 _ _) == (PeerNode p2 _ _) = p1 == p2
 
 -- | puts a message on the Node's outgoing message queue       
 enqMessage :: PeerNode a -> Message a -> STM ()
@@ -319,8 +321,9 @@ runPeerNode node (src, sink) expected = do
         case expected of
           Nothing -> return ()
           Just e -> when (e /= p) $ error "node identity mismatch"
-            
-        let pn = PeerNode p mq
+
+        now <- liftIO $ getCurrentTime >>= newTVarIO
+        let pn = PeerNode p mq now
         
         liftIO $ do
           logI $ "got hello from " ++ show pn
@@ -334,7 +337,9 @@ runPeerNode node (src, sink) expected = do
           (\_ -> do
               logI $ "lost connection to " ++ (show $ peerNodeInfo $ pnPeer pn)
               atomically $ removePeerNode (nodePeers node) pn)
-          (C.mapM_ $ handlePeerMessages node pn)
+          (C.mapM_ $ \m -> do
+              getCurrentTime >>= atomically . (writeTVar $ pnLastMessage pn)
+              handlePeerMessages node pn m)
         
       x       -> error $ show x
         
