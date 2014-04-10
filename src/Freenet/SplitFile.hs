@@ -63,7 +63,8 @@ fetchSplitFile fn (SplitFile comp dlen _ segs _) = do -- TODO: we're not returni
   running <- newTVarIO k
   
   -- try to fetch k randomly chosen blocks
-
+  -- TODO: actually, this will fetch *all* blocks in the background.
+  -- maybe we should stop when enough blocks were fetched.
   let
     download = do
       -- choose block to fetch
