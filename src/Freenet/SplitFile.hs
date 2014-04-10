@@ -63,16 +63,15 @@ fetchSplitFile fn (SplitFile comp dlen _ segs _) = do -- TODO: we're not returni
   running <- newTVarIO k
   
   -- try to fetch k randomly chosen blocks
-  -- TODO: actually, this will fetch *all* blocks in the background.
-  -- maybe we should stop when enough blocks were fetched.
   let
     download = do
       -- choose block to fetch
       next <- atomically $ do
         todo'    <- readTVar todo
+        done'    <- readTVar done
         rng'     <- readTVar rng
       
-        if null todo'
+        if null todo' || length done' == k
           then return Nothing
           else let (idx, rng'') = randomR (0, length todo' - 1) rng'
                    (ys, zs) = splitAt idx todo'
