@@ -108,4 +108,4 @@ mkPeer ni addr = Peer ni addr
 -----------------------------------------------------------------
 
 class UriFetch a where
-  getUriData :: a -> FN.URI -> IO (Either T.Text BSL.ByteString)
+  getUriData :: a -> FN.URI -> IO (Either T.Text (BS.ByteString, Int))

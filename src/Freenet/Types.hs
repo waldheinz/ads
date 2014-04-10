@@ -11,7 +11,6 @@ import Data.Binary
 import Data.Binary.Put
 import Data.Binary.Get
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
 import Data.Hashable
 import qualified Data.Text as T
 
@@ -51,9 +50,9 @@ class DataBlock f where
   -- Decrypts the data block. Be aware that the resulting data may still be compressed.
   decryptDataBlock
     :: f      
-    -> Key                          -- ^ the secret key
-    -> Word8                        -- ^ the crypto algorithm used (why this is not stored with the data is not known)
-    -> Either T.Text BSL.ByteString -- ^ either a beefy error message or the decrypted payload, already trimmed to correct length
+    -> Key                                -- ^ the secret key
+    -> Word8                              -- ^ the crypto algorithm used (why this is not stored with the data is not known)
+    -> Either T.Text (BS.ByteString, Int) -- ^ either an error or (decrypted payload, original length)
       
 class DataBlock a => StorePersistable a where
   storeSize :: a -> Int

@@ -36,11 +36,12 @@ fetchUri fn uri = do
   
   case db of
     Left e  -> return $ Left e
-    Right plaintext -> if isControlDocument uri
-                       then case parseMetadata plaintext of
-                         Left e   -> return $ Left e
-                         Right md -> resolvePath fn (uriPath uri) md Nothing
-                       else return $ Right plaintext
+    Right (pt, ptl) -> let pt' = BSL.take (fromIntegral ptl) $ BSL.fromStrict pt
+                       in if isControlDocument uri
+                          then case parseMetadata pt' of
+                            Left e   -> return $ Left e
+                            Right md -> resolvePath fn (uriPath uri) md Nothing
+                          else return $ Right pt'
 
 fetchRedirect :: Show a => Node a -> RedirectTarget -> [T.Text] -> IO (Either T.Text BSL.ByteString)
 fetchRedirect fn (RedirectKey _ uri) path = do

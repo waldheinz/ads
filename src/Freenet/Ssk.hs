@@ -130,14 +130,14 @@ mkSskBlock k h d pk
     hashHeader = BS.take 72 $ unSskHeader h
     sig = uncurry DSA.Signature $ sskHeaderRS h
 
-decryptSskBlock :: SskBlock -> Key -> Word8 -> Either T.Text BSL.ByteString
+decryptSskBlock :: SskBlock -> Key -> Word8 -> Either T.Text (BS.ByteString, Int)
 decryptSskBlock (SskBlock _ _ h d) key calg
   | calg /= 2 = Left $ T.pack $ "unknown SSK crypto algorithm " ++ show calg
   | dataLength < (fromIntegral origDataLength) = Left $ "data length mismatch"
-  | otherwise = Right $ BSL.take (fromIntegral origDataLength) plaintext
+  | otherwise = Right (plaintext, fromIntegral origDataLength) -- BSL.take (fromIntegral origDataLength) plaintext
   where
-    dataLength = BSL.length plaintext
-    plaintext = BSL.fromStrict $ runST $ do
+    dataLength = BS.length plaintext
+    plaintext = runST $ do
       pcfb <- mkPCFB docKey docIv
       pcfbDecipher pcfb d
 

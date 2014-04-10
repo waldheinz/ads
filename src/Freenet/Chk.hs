@@ -116,36 +116,36 @@ mkChkBlock k h d
 -- given the secret crypto key (second part of URIs), data found can be
 -- decrypted to get the source data back
 decryptChk
-  :: ChkBlock                     -- ^ the encrypted data together with their headers
-  -> Key                          -- ^ the secret crypto key (second part of URIs)
-  -> Word8                        -- ^ crypto algorithm used
-  -> Either T.Text BSL.ByteString -- ^ the decrypted payload
+  :: ChkBlock                           -- ^ the encrypted data together with their headers
+  -> Key                                -- ^ the secret crypto key (second part of URIs)
+  -> Word8                              -- ^ crypto algorithm used
+  -> Either T.Text (BS.ByteString, Int) -- ^ (decrypted payload, original length)
 decryptChk (ChkBlock _ header ciphertext) key calg
   | calg == 3 = decryptChkAesCtr header ciphertext key
   | calg == 2 = decryptChkAesPcfb header ciphertext key
   | otherwise = Left $ T.pack $ "unknown CHK crypto algorithm " ++ show calg
 
-decryptChkAesPcfb :: ChkHeader -> BS.ByteString -> Key -> Either T.Text BSL.ByteString
+decryptChkAesPcfb :: ChkHeader -> BS.ByteString -> Key -> Either T.Text (BS.ByteString, Int)
 decryptChkAesPcfb header ciphertext key
   | predIv /= iv = Left "CHK hash mismatch"
   | len > BS.length plaintext' = Left $ T.pack $ "invalid CHK length " ++ show len
-  | otherwise = Right (BSL.fromStrict plaintext)
+  | otherwise = Right (plaintext, len)
   where
     (plaintext', headers') = runST $ do
       pcfb <- mkPCFB (RD.initKey 32 $ unKey key) $ BS.replicate 32 0 -- ^ the IV is all zero, but
       h' <- pcfbDecipher pcfb $ BS.drop 2 $ unChkHeader header       -- ^ this is said to serve as IV
       p  <- pcfbDecipher pcfb ciphertext
       return (p, h')
-    plaintext = BS.take len plaintext'
+    plaintext = plaintext' -- BS.take len plaintext'
     iv = BS.take 32 headers'
     predIv = BSL.toStrict $ bytestringDigest $ sha256 (BSL.fromStrict $ unKey key)
     len = fromIntegral $ runGet getWord16be $ BSL.fromStrict $ BS.drop 32 headers'
     
-decryptChkAesCtr :: ChkHeader -> BS.ByteString -> Key -> Either T.Text BSL.ByteString
+decryptChkAesCtr :: ChkHeader -> BS.ByteString -> Key -> Either T.Text (BS.ByteString, Int)
 decryptChkAesCtr header ciphertext key
-  | len > BS.length plaintext = Left "invalid length"
+  | len > BS.length plaintext' = Left "invalid length"
   | mac /= BSL.fromStrict hash = Left "mac mismatch when verifying CHK payload"
-  | otherwise = Right (BSL.fromStrict plaintext)
+  | otherwise = Right (plaintext', len)
   where
     hash = chkHeaderHash header
     cipherLen = chkHeaderCipherLen header
@@ -154,7 +154,7 @@ decryptChkAesCtr header ciphertext key
     plaintext'' = decryptCTR aes iv $ BS.concat [ciphertext, cipherLen] -- TODO get rid of the concat
     (plaintext', lenbytes) = BS.splitAt (BS.length ciphertext) plaintext''
     len = fromIntegral $ runGet getWord16be $ BSL.fromStrict lenbytes
-    plaintext = BS.take len plaintext'
+--    plaintext = BS.take len plaintext'
     mac = bytestringDigest (hmacSha256 (BSL.fromStrict $ unKey key) (BSL.fromStrict plaintext''))
 
 -------------------------------------------------------------------------------------------------
@@ -173,7 +173,15 @@ instance Binary ChkRequest where
 instance DataRequest ChkRequest where
   dataRequestLocation = chkReqLocation
 
-decompressChk :: CompressionCodec -> BSL.ByteString -> IO (Either T.Text BSL.ByteString)
-decompressChk codec inp
-  | codec == None = return $ Right inp
-  | otherwise     = decompress codec $ BSL.drop 4 inp
+decompressChk
+  :: CompressionCodec -- ^ codec to use
+  -> BS.ByteString    -- ^ compressed data
+  -> Int              -- ^ true compressed data length
+  -> IO (Either T.Text (BS.ByteString, Int))
+decompressChk codec inp inpl
+  | codec == None = return $ Right (inp, inpl)
+  | otherwise     = do
+    dec <- decompress codec $ BSL.drop 4 $ BSL.fromStrict (BS.take inpl inp)
+    case dec of
+      Left e     -> return $ Left $ "error decompressing data: " `T.append` e
+      Right dec' -> return $ Right (BSL.toStrict dec', fromIntegral $ BSL.length dec')

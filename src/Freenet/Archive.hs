@@ -101,8 +101,8 @@ fetchRedirect' fetch (RedirectKey _ uri) = do
   mbs <- getUriData fetch uri
   case mbs of
     Left e   -> return $ Left $ "fetchRedirect': error with requestNodeData: " `T.append` e
-    Right bs -> case parseMetadata bs of
-      Left _  -> return $ Right bs  -- return $ Left $ "fetchRedirect': can't parse metadata: " `T.append` e'
+    Right (bs, len) -> case parseMetadata (BSL.take (fromIntegral len) $ BSL.fromStrict bs) of
+      Left _  -> return $ Right $ BSL.take (fromIntegral len) $ BSL.fromStrict bs  -- return $ Left $ "fetchRedirect': can't parse metadata: " `T.append` e'
       Right md -> case md of
         ArchiveManifest (RedirectSplitFile sf) _ _ _ -> fetchSplitFile fetch sf
         _ -> return $ Left $ "fetchRedirect': what shall I do with metadata: " `T.append` (T.pack $ show md)

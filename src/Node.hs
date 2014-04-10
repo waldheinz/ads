@@ -21,6 +21,7 @@ import Control.Monad ( forever, unless, void, when )
 import Control.Monad.IO.Class ( liftIO )
 
 import Data.Aeson
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
@@ -360,7 +361,7 @@ runPeerNode node (src, sink) expected = do
 instance (Show a) => UriFetch (Node a) where
   getUriData = requestNodeData
 
-requestNodeData :: (Show a) => Node a -> FN.URI -> IO (Either T.Text BSL.ByteString)
+requestNodeData :: (Show a) => Node a -> FN.URI -> IO (Either T.Text (BS.ByteString, Int))
 requestNodeData n (FN.CHK loc key extra _) = do
   case FN.chkExtraCompression extra of
     Left  e -> return $ Left $ "can't decompress CHK: " `T.append` e
@@ -368,8 +369,8 @@ requestNodeData n (FN.CHK loc key extra _) = do
       let
         req = FN.ChkRequest loc (FN.chkExtraCrypto extra)
         decrypt blk = case FN.decryptDataBlock blk key $ FN.chkExtraCrypto extra of
-          Left e  -> return $ Left $ "decrypting CHK data block failed: " `T.append` e
-          Right p -> FN.decompressChk c p
+          Left e        -> return $ Left $ "decrypting CHK data block failed: " `T.append` e
+          Right (p, pl) -> FN.decompressChk c p pl
  
       fromStore <- FN.getChk (nodeFreenet n) req
 
@@ -394,7 +395,7 @@ requestNodeData n (FN.SSK pkh key extra dn _) = do
   fromStore <- FN.getSsk (nodeFreenet n) req
 
   case fromStore of
-    Right blk -> return $ decrypt blk
+    Right blk -> return $ decrypt blk -- (BSL.take (fromIntegral bl) $ BSL.fromStrict blk)
     Left _    -> do
       d <- request (nodeSskRequests n) req $ \r -> do
         msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest r)

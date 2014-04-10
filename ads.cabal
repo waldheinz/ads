@@ -40,6 +40,7 @@ executable ads
     cprng-aes            >= 0.5,
     crypto-pubkey        >= 0.2,
     directory            >= 1.2,
+    fec                  >= 0.1,
     filepath             >= 1.3,
     hashable             >= 1.2,
     hslogger             >= 1.2,
