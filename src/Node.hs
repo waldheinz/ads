@@ -26,7 +26,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 import qualified Data.Conduit.TQueue as C
-import Data.List ( (\\), find )
+import Data.List ( (\\), find, nub )
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
@@ -217,7 +217,7 @@ mergePeer node p = unless (p == nodeIdentity node) $ do
 
   let known' = case find (== p) known of
         Nothing -> (p:known)
-        Just p' -> (p { peerAddress = mergeAddress (peerAddress p) (peerAddress p') } : filter (/=p) known)
+        Just p' -> (p { peerAddresses = nub $ (peerAddresses p) ++ (peerAddresses p') } : filter (/=p) known)
 
   writeTVar (peersKnown ps) (known')
 

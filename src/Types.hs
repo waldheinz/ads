@@ -78,12 +78,12 @@ instance FromJSON NodeInfo where
 -- Peers / Peer Nodes
 ----------------------------------------------------------------
 
-class (FromJSON a, Show a) => PeerAddress a where
-  mergeAddress :: a -> a -> a
+class (FromJSON a, Show a, Eq a) => PeerAddress a where
+--  mergeAddress :: a -> a -> a
 
 data Peer a = Peer
-            { peerNodeInfo :: NodeInfo        -- ^ the static node info of this peer
-            , peerAddress  :: a               -- ^ where this peer might be connected
+            { peerNodeInfo  :: NodeInfo        -- ^ the static node info of this peer
+            , peerAddresses :: [a]             -- ^ where this peer can be connected
             } deriving ( Show )
 
 instance Eq (Peer a) where
@@ -92,14 +92,14 @@ instance Eq (Peer a) where
 instance FromJSON a => FromJSON (Peer a) where
   parseJSON (Object v) = Peer <$>
                          v .: "node" <*>
-                         v .: "address"
+                         v .: "addresses"
   parseJSON _ = mzero
 
 instance (Binary a) => Binary (Peer a) where
   put (Peer ni addr) = put ni >> put addr
   get = Peer <$> get <*> get
 
-mkPeer :: PeerAddress a => NodeInfo -> a -> Peer a
+mkPeer :: PeerAddress a => NodeInfo -> [a] -> Peer a
 mkPeer ni addr = Peer ni addr
 
 -----------------------------------------------------------------

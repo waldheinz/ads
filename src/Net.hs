@@ -4,7 +4,7 @@
 -- |
 -- TCP/IP Networking
 module Net (
-  TcpAddressInfo(..),
+  TcpAddress(..),
   nodeListen, tcpConnect
   ) where
 
@@ -44,24 +44,11 @@ instance FromJSON TcpAddress where
                          v .: "port"
   parseJSON _ = mzero
   
--- |
--- The type of addresses TCP/IP networking deals with
-data TcpAddressInfo = AI [TcpAddress] deriving ( Eq, Show ) -- a list of (hostname, port)
-
-instance Binary TcpAddressInfo where
-  put (AI as) = put as
-  get = AI <$> get
-
-instance FromJSON TcpAddressInfo where
-  parseJSON (Array as) = AI <$> (mapM parseJSON $ V.toList as)
-  parseJSON _ = mzero
-
-instance PeerAddress TcpAddressInfo where
-  mergeAddress (AI l1) (AI l2) = AI $ nub $ l1 ++ l2
+instance PeerAddress TcpAddress where
   
 -- |
 -- listens on the configured addresses and accepts incomping peer connections
-nodeListen :: CFG.Config -> Node TcpAddressInfo -> IO ()
+nodeListen :: CFG.Config -> Node TcpAddress -> IO ()
 nodeListen cfg node = do
   host <- CFG.require cfg "host"
   port <- CFG.require cfg "port"
@@ -75,9 +62,9 @@ nodeListen cfg node = do
 
   infoM "net" $ "node listening on " ++ host ++ ":" ++ show port
 
-tcpConnect :: ConnectFunction TcpAddressInfo
+tcpConnect :: ConnectFunction TcpAddress
 tcpConnect peer handler = do
-  let (AI addrs) = peerAddress peer
+  let addrs = peerAddresses peer
   if null addrs
     then handler $ Left "no addresses"  -- TODO: deal with multiple adresses
     else let TcpAddress host port = head addrs in
