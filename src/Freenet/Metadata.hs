@@ -105,7 +105,12 @@ getMime flags =
          x <- getWord16be
          when (x > 32767) $ void getWord16be -- compessed MIME params, whatever?
          return $ Just $ lookupMime defaultMimes x
-       else fail "only compressed MIME supported"
+       else do
+         len   <- getWord8
+         bytes <- getByteString (fromIntegral len)
+         case decodeUtf8' bytes of
+           Left e    -> fail $ "invalid UTF8 in uncompressed MIME string " ++ show e
+           Right tgt -> return $ Just tgt
 
 getSplitFileSegment
   :: Maybe (Key, Word8)    -- ^ maybe common (decryption key, algorithm)
