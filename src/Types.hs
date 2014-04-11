@@ -3,12 +3,15 @@
 
 module Types (
   NodeId, mkNodeId', NodeInfo(..),
+
+  ToStateJSON(..),
   
-  PeerAddress(..), Peer(..), mkPeer,
+  PeerAddress, Peer(..), mkPeer,
   UriFetch(..)
   ) where
 
 import Control.Applicative ( pure, (<$>), (<*>) )
+import Control.Concurrent.STM
 import Control.Monad ( mzero )
 import Data.Aeson
 import Data.Binary
@@ -20,7 +23,7 @@ import qualified Data.ByteString.Base16 as HEX
 import qualified Data.ByteString.Char8 as BSC
 import Data.Ratio ( (%) )
 import qualified Data.Text as T
-import Data.Text.Encoding ( encodeUtf8 )
+import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
 
 import qualified Freenet.URI as FN
 import qualified NextBestOnce as NBO
@@ -41,6 +44,9 @@ instance Show NodeId where
 instance FromJSON NodeId where
   parseJSON (String s) = pure $ NodeId $ fst (HEX.decode $ encodeUtf8 s)
   parseJSON _ = mzero
+
+instance ToJSON NodeId where
+  toJSON (NodeId bs) = toJSON $ decodeUtf8 $ HEX.encode bs
 
 nodeIdToInteger :: NodeId -> Integer
 nodeIdToInteger (NodeId bs) = BS.foldl' (\i bb -> (i `shiftL` 8) + fromIntegral bb) 0 bs
@@ -72,14 +78,23 @@ instance FromJSON NodeInfo where
   parseJSON (Object v) = NodeInfo <$>
                          v .: "id"
   parseJSON _ = mzero
-  
+
+instance ToJSON NodeInfo where
+  toJSON ni = object
+              [ "id" .= nodeId ni
+              ]
+
+class ToStateJSON a where
+  toStateJSON :: a -> STM Value
+
+instance ToStateJSON a => ToStateJSON [a] where
+  toStateJSON xs = toJSON <$> mapM toStateJSON xs
 
 ----------------------------------------------------------------
 -- Peers / Peer Nodes
 ----------------------------------------------------------------
 
 class (FromJSON a, Show a, Eq a) => PeerAddress a where
---  mergeAddress :: a -> a -> a
 
 data Peer a = Peer
             { peerNodeInfo  :: NodeInfo        -- ^ the static node info of this peer
@@ -94,6 +109,12 @@ instance FromJSON a => FromJSON (Peer a) where
                          v .: "node" <*>
                          v .: "addresses"
   parseJSON _ = mzero
+
+instance ToJSON a => ToJSON (Peer a) where
+  toJSON p = object
+             [ "node"      .= peerNodeInfo p
+             , "addresses" .= peerAddresses p
+             ]
 
 instance (Binary a) => Binary (Peer a) where
   put (Peer ni addr) = put ni >> put addr

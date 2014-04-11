@@ -22,6 +22,7 @@ import Freenet.Rijndael as RD
 import Logging as LOG
 import Net
 import Node
+import RestApi
 
 logE :: String -> IO ()
 logE m = errorM "main" m
@@ -63,7 +64,10 @@ main = withSocketsDo $ do
       initPeers n tcpConnect appDir
       nodeListen (CFG.subconfig "node.listen" cfg) n
       return n
-  
+
+  -- start HTTP Server
+  void $ forkIO $ Warp.run 8080 (restApi node)
+
   -- start fproxy
   fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"
   when fproxyEnabled $ do

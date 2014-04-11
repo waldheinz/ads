@@ -4,7 +4,7 @@
 module Node (
   -- * our node
   Node, mkNode,
-  requestNodeData, nodeArchives,
+  requestNodeData, nodeArchives, nodePeers,
   
   -- * peers
   ConnectFunction, initPeers,
@@ -183,6 +183,17 @@ data Peers a = Peers
                , peersKnown         :: TVar [Peer a]     -- ^ all peers we know about, includes above
                }
 
+instance ToJSON a => ToStateJSON (Peers a) where
+  toStateJSON ps = do
+    cting <- readTVar $ peersConnecting ps
+    known <- readTVar $ peersKnown ps
+    connt <- readTVar (peersConnected ps) >>= toStateJSON
+    return $ object
+      [ "connecting" .= cting
+      , "known"      .= known
+      , "connected"  .= connt
+      ]
+
 mkPeers :: STM (Peers a)
 mkPeers = Peers <$> newTVar [] <*> newTVar [] <*> newTVar []
 
@@ -295,6 +306,14 @@ instance (Show a) => Show (PeerNode a) where
 
 instance Eq (PeerNode a) where
   (PeerNode p1 _ _) == (PeerNode p2 _ _) = p1 == p2
+
+instance ToJSON a => ToStateJSON (PeerNode a) where
+  toStateJSON pn = do
+    lm <- readTVar $ pnLastMessage pn
+    return $ object
+      [ "peer"        .= pnPeer pn
+--     , "lastMessage" .= (fromIntegral lm)
+      ]
 
 -- | puts a message on the Node's outgoing message queue       
 enqMessage :: PeerNode a -> Message a -> STM ()

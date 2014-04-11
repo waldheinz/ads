@@ -21,8 +21,6 @@ import Data.Binary
 import Data.Conduit
 import Data.Conduit.Network
 import Data.Conduit.Serialization.Binary
-import Data.List ( nub )
-import qualified Data.Vector as V
 import System.IO.Error ( catchIOError )
 
 import Logging
@@ -43,6 +41,12 @@ instance FromJSON TcpAddress where
                          v .: "host" <*>
                          v .: "port"
   parseJSON _ = mzero
+
+instance ToJSON TcpAddress where
+  toJSON (TcpAddress h p) = object
+                            [ "host" .= h
+                            , "port" .= p
+                            ]
   
 instance PeerAddress TcpAddress where
   
