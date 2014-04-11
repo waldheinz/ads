@@ -3,6 +3,7 @@
 
 module Freenet (
   Freenet, initFn,
+  fnChkStore, fnSskStore,
   getChk, getSsk,
   offerChk, offerSsk
   ) where

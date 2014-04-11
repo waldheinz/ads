@@ -5,6 +5,7 @@ module Node (
   -- * our node
   Node, mkNode,
   requestNodeData, nodeArchives, nodePeers,
+  nodeFreenet,
   
   -- * peers
   ConnectFunction, initPeers,

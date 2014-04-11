@@ -1,5 +1,5 @@
 
-{-# LANGUAGE MultiParamTypeClasses, RankNTypes #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Freenet.Store (
   StoreFile, mkStoreFile, putData, getData,
@@ -9,7 +9,9 @@ module Freenet.Store (
   ) where
 
 import qualified Control.Concurrent.Lock as Lock
+import Control.Concurrent.STM
 import Control.Monad ( void )
+import Data.Aeson
 import Data.Binary
 import Data.Binary.Get ( runGetOrFail )
 import Data.Binary.Put ( runPut )
@@ -19,17 +21,31 @@ import System.IO
 import System.Log.Logger
 
 import Freenet.Types
+import Types
 
 ----------------------------------------------------------------
 -- store types
 ----------------------------------------------------------------
 
 data StoreFile f = StoreFile
-                     { sfLock       :: ! Lock.Lock -- ^ for accessing the handle
-                     , sfHandle     :: ! Handle
-                     , sfEntrySize  :: ! Int
-                     , sfEntryCount :: ! Int
+                     { sfLock        :: ! Lock.Lock -- ^ for accessing the handle
+                     , sfHandle      :: ! Handle
+                     , sfEntrySize   :: ! Int
+                     , sfEntryCount  :: ! Int
+                     , sfReads       ::   TVar Word64 -- ^ total number of reads
+                     , sfReadSuccess ::   TVar Word64 -- ^ number of successful reads
                      }
+
+instance ToStateJSON (StoreFile f) where
+  toStateJSON sf = do
+    r <- readTVar $ sfReads sf
+    s <- readTVar $ sfReadSuccess sf
+    return $ object
+      [ "entrySize"    .= sfEntrySize sf
+      , "capacity"     .= sfEntryCount sf
+      , "readRequests" .= r
+      , "readSuccess"  .= s
+      ]
 
 logI :: String -> IO ()
 logI m = infoM "freenet.store" m
@@ -43,9 +59,12 @@ mkStoreFile sp fileName count = do
   
   handle <- openBinaryFile fileName ReadWriteMode
   hSetFileSize handle $ fromIntegral fileSize
-    
+  
+  rds <- newTVarIO 0
+  scs <- newTVarIO 0
   lck <- Lock.new
-  return $ StoreFile lck handle entrySize count
+  
+  return $ StoreFile lck handle entrySize count rds scs
 
 locOffsets :: StoreFile f -> Key -> [Integer]
 locOffsets sf loc = map (\i -> (fromIntegral i `rem` (fromIntegral count)) * (fromIntegral entrySize)) [idx .. idx + 5]
@@ -87,7 +106,11 @@ putData' sf df = Lock.with (sfLock sf) $ doWrite where
                               else go os
   
 getData :: StorePersistable f => StoreFile f -> Key -> IO (Maybe f)
-getData fs key = Lock.with (sfLock fs) $ doRead key where
+getData fs key = Lock.with (sfLock fs) $ doRead key >>= \result -> countRead result >> return result where
+  countRead r = atomically $ modifyTVar' (sfReads fs) (+1) >> case r of
+    Nothing -> return ()
+    Just _  -> modifyTVar' (sfReadSuccess fs) (+1)
+    
   handle = sfHandle fs
   doGet = do
     flags <- getWord8
