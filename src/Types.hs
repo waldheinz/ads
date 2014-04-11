@@ -16,7 +16,6 @@ import Data.Binary.Get
 import Data.Binary.Put
 import Data.Bits ( shiftL )
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Base16 as HEX
 import qualified Data.ByteString.Char8 as BSC
 import Data.Ratio ( (%) )
