@@ -60,7 +60,7 @@ void* lzma_decode(struct lzma_dec_state *state, void *src, size_t src_len, size_
 			&state->decoder,
 			target + *dest_len, &remain_out,
 			src    + pos_in , &remain_in,
-			LZMA_FINISH_END,
+			LZMA_FINISH_ANY,
 			&status);
     
     pos_in  += remain_in;
