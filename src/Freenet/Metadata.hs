@@ -153,10 +153,10 @@ getCompression flags dlen =
 
 getSplitFile
   :: Version
-  -> Word16      -- ^ flags
-  -> Maybe Key   -- ^ (single crypto key for all segments), if those are common
-  -> Word8 -- ^ single crypto algorihm for all segments
-  -> Get RedirectTarget
+  -> Word16        -- ^ flags
+  -> Maybe Key     -- ^ (single crypto key for all segments), if those are common
+  -> Word8         -- ^ single crypto algorihm for all segments
+  -> Get SplitFile
 getSplitFile v flags mkey cryptoAlgo = do
   dlen <- getWord64be
   
@@ -197,7 +197,7 @@ getSplitFile v flags mkey cryptoAlgo = do
       dataBlocks  <- replicateM (fromIntegral splitfileBlocks)      $ getSplitFileSegment gsfsParams True
       checkBlocks' <- replicateM (fromIntegral splitfileCheckBlocks) $ getSplitFileSegment gsfsParams False
       
-      return $! RedirectSplitFile $ SplitFile ccodec dlen olen (dataBlocks ++ checkBlocks') mime
+      return $! SplitFile ccodec dlen olen (dataBlocks ++ checkBlocks') mime
       
     x -> fail $ "unknown splitfile algo " ++ show x
 
@@ -214,6 +214,9 @@ data Metadata
     }
   | Manifest
     { mEntries      :: ManifestEntries
+    }
+  | MultiLevel
+    { mlSplitfile   :: SplitFile
     }
   | ArchiveManifest
     { amTarget      :: RedirectTarget
@@ -283,6 +286,29 @@ getArchiveManifest v = do
   flags <- getWord16be
   (hashes, target, (Just atype)) <- getSimpleRedirect' v flags True
   return $ ArchiveManifest target atype hashes None
+
+getMultiLevel :: Version -> Get Metadata
+getMultiLevel v = do
+  flags <- getWord16be
+
+  hashes <- if flagSet flags (flagBit Hashes)
+            then getHashes 
+            else return []
+  
+  when (v == V1 && not (elem SHA256 $ map fst hashes)) $ fail "no SHA256 hash specified in V1 redirect on multilevel"
+  when (flagSet flags (flagBit HashThisLayer)) $ fail "unsupported hashThisLayer flag set on multilevel"
+  when (flagSet flags (flagBit Dbr)) $ fail "unsupported dbr flag set on multilevel"
+  when (flagSet flags (flagBit ExtraMetadata)) $ fail "unsupported extraMetadata flag set on multilevel"
+  unless (flagSet flags (flagBit FlagSplitFile)) $ fail "expected multilevel being a splitfile"
+  
+  calg <- if v == V1
+          then getWord8 -- single crypto algorithm
+          else return 2 -- ALGO_AES_PCFB_256_SHA256
+  key <- if flagSet flags (flagBit SpecifySplitfileKey)
+         then Just . mkKey' <$> getByteString 32
+         else return $ deriveCryptoKey hashes
+              
+  MultiLevel <$> getSplitFile v flags key calg
 
 getArchiveManifestType :: Get ArchiveType
 getArchiveManifestType = do
@@ -364,15 +390,13 @@ getSimpleRedirect' v flags isArchive = do
               key <- if flagSet flags (flagBit SpecifySplitfileKey)
                      then Just . mkKey' <$> getByteString 32
                      else return $ deriveCryptoKey hashes
-              getSplitFile v flags key calg
+              RedirectSplitFile <$> getSplitFile v flags key calg
             else do
               -- unless (flags == 40) $ fail $ "unsupported flags for key redirect " ++ show flags
               mime <- getMime flags
               RedirectKey mime <$> getKey flags
                  
   return $! (hashes, target, atype)
-
-
 
 data Version = V0 | V1 deriving ( Eq )
 
@@ -388,6 +412,7 @@ instance Binary Metadata where
       then fail "missing magic"
       else case (version, doctype) of
         (0, 0) -> getSimpleRedirect V0
+        (0, 1) -> getMultiLevel V0
         (0, 2) -> getSimpleManifest
         (0, 3) -> getArchiveManifest V0
         (0, 4) -> getArchiveInternalRedirect

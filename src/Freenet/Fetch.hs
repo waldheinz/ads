@@ -42,13 +42,14 @@ fetchUri fn uri = do
                             Left e   -> return $ Left e
                             Right md -> resolvePath fn (uriPath uri) md Nothing
                           else return $ Right pt'
-
+{-
 fetchRedirect :: Show a => Node a -> RedirectTarget -> [T.Text] -> IO (Either T.Text BSL.ByteString)
 fetchRedirect fn (RedirectKey _ uri) path = do
   logI $ "fetch redirect to " ++ show uri ++ " with path " ++ show path
   fetchUri fn $ appendUriPath uri path
 fetchRedirect fn (RedirectSplitFile sf) _ = fetchSplitFile fn sf
-    
+  -}
+  
 -- | FIXME: watch out for infinite redirects
 resolvePath
   :: Show a => Node a
@@ -77,10 +78,22 @@ resolvePath fn ps (ArchiveMetadataRedirect tgt) (Just archive) = do
       Right md -> resolvePath fn ps md (Just archive)
 
 -- follow simple redirects
-resolvePath fn ps (SimpleRedirect _ tgt) _ = do
-  logI $ "following simple redirect to " ++ (show tgt) ++ " for " ++ show ps
-  fetchRedirect fn tgt ps
+resolvePath fn ps (SimpleRedirect _ (RedirectKey _ uri)) arch = do
+  logI $ "following simple (key) redirect to " ++ (show uri) ++ " for " ++ show ps
   
+  db <- requestNodeData fn uri
+
+  case db of
+    Left e  -> return $ Left $ "failed to fetch data while following key redirect: " `T.append` e
+    Right (pt, ptl) -> let pt' = BSL.take (fromIntegral ptl) $ BSL.fromStrict pt
+                       in if isControlDocument uri
+                          then case parseMetadata pt' of
+                            Left e   -> return $ Left $ "error parsing metadata while following key redirect: " `T.append` e
+                            Right md -> resolvePath fn (uriPath uri ++ ps) md arch
+                          else return $ Right pt'
+
+resolvePath fn [] (SimpleRedirect _ (RedirectSplitFile sf)) _ = fetchSplitFile fn sf
+
 -- resolve path in manifest
 resolvePath fn (p:ps) md@(Manifest me) arch = do
   logI $ "resolving " ++ show p ++ " in manifest"
@@ -109,6 +122,15 @@ resolvePath fn ps (ArchiveManifest atgt atype _ _) _ = do
         Just mdbs -> case parseMetadata mdbs of
           Right md -> resolvePath fn ps md (Just emap)
           x        -> return $ Left $ "error parsing manifest from TAR archive: " `T.append` (T.pack $ show x)
+
+resolvePath fn ps (MultiLevel sf) arch = do
+  sfc <- fetchSplitFile fn sf
+
+  case sfc of
+    Left e   -> return $ Left $ "error fetching splitfile for MultiLevel metadata: " `T.append` e
+    Right bs -> case parseMetadata bs of
+      Left e   -> return $ Left $ "error parsing MultiLevel metadata: " `T.append` e
+      Right md -> resolvePath fn ps md arch
 
 -- give up resolving this path
 resolvePath _ ps md arch = return $ Left $ T.concat [

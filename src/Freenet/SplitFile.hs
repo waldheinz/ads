@@ -110,7 +110,7 @@ fetchSplitFile fn (SplitFile comp dlen _ segs _) = do -- TODO: we're not returni
     Left e   -> return $ Left e
     Right bs -> do
       fec <- catch
-             (return $ Right $ FEC.decode (FEC.fec k total) bs)
+             (return $ Right $ FEC.decode (FEC.fec k total) $ take k bs)
              (\e -> return $ Left $ T.pack $ show ( e :: ErrorCall))
              
       case fec of

@@ -168,7 +168,7 @@ forwardResponse node mid msg = do
   mtgt <- atomically $ messagePopPred node mid
   
   case mtgt of
-    Nothing -> logW $ "could not send response, message id unknown: " ++ show mid
+    Nothing -> return () -- logW $ "could not send response, message id unknown: " ++ show mid
     Just pn -> atomically $ enqMessage pn $ Response mid msg
 
 type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()

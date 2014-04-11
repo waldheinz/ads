@@ -75,7 +75,7 @@ putData' sf df = Lock.with (sfLock sf) $ doWrite where
     logI $ (show loc) ++ " written at " ++ show o
 
   doWrite = go $ locOffsets sf loc where
-      go []     = logI "no free slots in store" >> return Nothing
+      go []     = {- logI "no free slots in store" >> -} return Nothing
       go (o:os) = do
         hSeek handle AbsoluteSeek o
         d <- BSL.hGet handle $ sfEntrySize sf
