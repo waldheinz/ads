@@ -88,11 +88,11 @@ fetchArchive' fetch tgt tp = do
   case arch of
     Left e   -> return $ Left e
     Right bs -> case tp of
-      TAR -> return $ Right $ TAR.foldEntries
+      TAR -> BSL.writeFile "strangetar" bs >> (return $ Right $ TAR.foldEntries
              (\e m -> case TAR.entryContent e of
                  TAR.NormalFile ebs _ -> Map.insert (TAR.entryPath e) ebs m
                  _                    -> m
-             ) Map.empty (const Map.empty) $ TAR.read bs
+             ) Map.empty (const Map.empty) $ TAR.read bs)
       ZIP -> parseZip bs
 
 fetchRedirect' :: UriFetch a => a -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
