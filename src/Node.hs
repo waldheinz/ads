@@ -162,8 +162,6 @@ sendRoutedMessage node msg prev = do
     NBO.Backtrack dest msg' -> atomically $ enqMessage dest (Routed True  msg')
     NBO.Fail                -> logI $ "message failed fatally: " ++ show msg
 
--- |
--- 
 messagePushPred :: Node a -> MessageId -> PeerNode a -> IO ()
 messagePushPred node mid pn = do
   now <- getTime
@@ -269,12 +267,20 @@ addPeerNode node pn = do
 -- Removed a peer from the set of connected peers, when we decided
 -- we don't want to talk to this peer any more, or the connection
 -- was lost.
-removePeerNode :: Peers a -> PeerNode a -> STM ()
-removePeerNode p n = do
-  modifyTVar' (peersConnecting p) $ filter (/= pnPeer n)
-  modifyTVar' (peersConnected p)  $ filter (/= n)
-  -- TODO: remove this peer's messages from routing map
-  
+removePeerNode :: Node a -> PeerNode a -> STM ()
+removePeerNode node pn = do
+  modifyTVar' (peersConnecting ps) $ filter (/= pnPeer pn)   -- ^ this node is not connecting (and should not have been)
+  modifyTVar' (peersConnected ps)  $ filter (/= pn)          -- ^ it's also no longer connected
+  modifyTVar' (nodeActMsgs node) $ Map.mapMaybe dropPreds    -- ^ and we can drop messages routed for this node
+  where
+    ps = nodePeers node
+         
+    dropPreds am
+      | null xs'  = Nothing
+      | otherwise = Just am { amPreds = xs' }
+      where
+        xs' = filter (/= pn) (amPreds am)
+        
 maintainConnections :: PeerAddress a => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
   -- we simply try to maintain a connection to all known peers for now
@@ -391,7 +397,7 @@ runPeerNode node (src, sink) expected = do
         C.addCleanup
           (\_ -> do
               logI $ "lost connection to " ++ (show $ peerNodeInfo $ pnPeer pn)
-              atomically $ removePeerNode (nodePeers node) pn)
+              atomically $ removePeerNode node pn)
           (C.mapM_ $ \m -> do
               getTime >>= atomically . (writeTVar $ pnLastMessage pn)
               handlePeerMessages node pn m)
