@@ -47,10 +47,10 @@ import Time
 import Types
 
 logI :: String -> IO ()
-logI m = infoM "node" m
+logI = infoM "node"
 
 logW :: String -> IO ()
-logW m = warningM "node" m
+logW = warningM "node"
 
 -------------------------------------------------------------------------
 -- Node
@@ -70,20 +70,20 @@ data Node a = Node
 
 mkNode :: (Show a) => Peer a -> FN.Freenet a -> IO (Node a)
 mkNode self fn = do
-  peers  <- atomically $ mkPeers
+  peers  <- atomically mkPeers
   midgen <- mkMessageIdGen
   msgMap <- newTVarIO Map.empty
   ac     <- FN.mkArchiveCache 10
-  chkRm  <- atomically $ mkRequestManager
-  sskRm  <- atomically $ mkRequestManager
+  chkRm  <- atomically mkRequestManager
+  sskRm  <- atomically mkRequestManager
 
   let
     nbo = NBO.Node
         { NBO.location          = nodeId $ peerNodeInfo self
         , NBO.neighbours        = readTVar $ peersConnected peers
-        , NBO.neighbourLocation = \np -> nodeId $ peerNodeInfo $ pnPeer np
-        , NBO.popPred           = \msg -> messagePopPred node (rmId msg)
-        , NBO.pushPred          = \msg -> messagePushPred node (rmId msg)
+        , NBO.neighbourLocation = nodeId . peerNodeInfo . pnPeer
+        , NBO.popPred           = messagePopPred node . rmId
+        , NBO.pushPred          = messagePushPred node . rmId
         , NBO.routingInfo       = rmInfo
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
@@ -197,7 +197,7 @@ nodeRouteStatus node = do
   now <- getTime
 
   let
-    toState xs mid am = (x : xs) where
+    toState xs mid am = x : xs where
       x = object
           [ "messageId" .= mid
           , "age"       .= timeDiff (amStarted am) now
@@ -211,7 +211,7 @@ nodeRouteStatus node = do
 -- the peers list
 ----------------------------------------------------------------
 
-type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
+type ConnectFunction a = Peer a -> (Either String (MessageIO a) -> IO ()) -> IO ()
 
 data Peers a = Peers
                { peersConnected     :: TVar [PeerNode a] -- ^ peers we're currently connected to
@@ -250,7 +250,7 @@ initPeers node connect dataDir = do
   case eitherDecode kpbs of
     Left  e     -> logW ("error parsing peers file: " ++ e)
     Right peers -> do
-      logI ("got " ++ (show $ length peers) ++ " peers")
+      logI ("got " ++ show (length peers) ++ " peers")
       atomically $ writeTVar (peersKnown $ nodePeers node) peers
 
 -- |
@@ -263,10 +263,10 @@ mergePeer node p = unless (p == nodeIdentity node) $ do
   known <- readTVar $ peersKnown ps
 
   let known' = case find (== p) known of
-        Nothing -> (p:known)
-        Just p' -> (p { peerAddresses = nub $ (peerAddresses p) ++ (peerAddresses p') } : filter (/=p) known)
+        Nothing -> p : known
+        Just p' -> p { peerAddresses = nub $ peerAddresses p ++ peerAddresses p' } : filter (/=p) known
 
-  writeTVar (peersKnown ps) (known')
+  writeTVar (peersKnown ps) known'
 
 -- |
 -- Adds a peer to the set of connected peers. It is now a partner
@@ -312,7 +312,7 @@ maintainConnections node connect = forever $ do
     connected <- readTVar $ peersConnected peers
     
     let
-      result = (known \\ cting) \\ (map pnPeer connected)
+      result = (known \\ cting) \\ map pnPeer connected
 
     if null result
       then retry
@@ -322,11 +322,11 @@ maintainConnections node connect = forever $ do
         return result'
 
   logI $ "connecting to " ++ show shouldConnect
-  void $ forkIO $ connect shouldConnect $ \cresult -> do
+  void $ forkIO $ connect shouldConnect $ \cresult ->
     case cresult of
       Left e -> do
         logW $ "error connecting: " ++ e ++ " on " ++ show shouldConnect
-        atomically $ modifyTVar' (peersConnecting peers) (filter $ (/= shouldConnect))
+        atomically $ modifyTVar' (peersConnecting peers) (filter (/= shouldConnect))
       
       Right msgio -> do
         logI $ "connected to " ++ show shouldConnect
@@ -352,7 +352,7 @@ instance Eq (PeerNode a) where
   (PeerNode p1 _ _) == (PeerNode p2 _ _) = p1 == p2
 
 instance ToJSON a => ToStateJSON (PeerNode a) where
-  toStateJSON pn = do
+  toStateJSON pn = 
 --    lm <- readTVar $ pnLastMessage pn
     return $ object
       [ "peer"        .= pnPeer pn
@@ -361,7 +361,7 @@ instance ToJSON a => ToStateJSON (PeerNode a) where
 
 -- | puts a message on the Node's outgoing message queue       
 enqMessage :: PeerNode a -> Message a -> STM ()
-enqMessage n m = writeTBMQueue (pnQueue n) m
+enqMessage n = writeTBMQueue (pnQueue n)
 
 {-
 doPing :: PeerNode a -> IO ()
@@ -392,7 +392,7 @@ runPeerNode node (src, sink) expected = do
   -- enqueue the obligatory Hello message, if this is an outgoing connection
   when (isJust expected) $ atomically $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
   
-  tid <- forkIO $ src C.$$ C.awaitForever $ \msg -> do
+  tid <- forkIO $ src C.$$ C.awaitForever $ \msg ->
     case msg of
       Direct (Hello p) -> do
         case expected of
@@ -411,10 +411,10 @@ runPeerNode node (src, sink) expected = do
             
         C.addCleanup
           (\_ -> do
-              logI $ "lost connection to " ++ (show $ peerNodeInfo $ pnPeer pn)
+              logI $ "lost connection to " ++ show (peerNodeInfo $ pnPeer pn)
               atomically $ removePeerNode node pn)
           (C.mapM_ $ \m -> do
-              getTime >>= atomically . (writeTVar $ pnLastMessage pn)
+              getTime >>= atomically . writeTVar (pnLastMessage pn)
               handlePeerMessages node pn m)
         
       x       -> error $ show x
@@ -425,7 +425,7 @@ instance (Show a) => UriFetch (Node a) where
   getUriData = requestNodeData
 
 requestNodeData :: (Show a) => Node a -> FN.URI -> IO (Either T.Text (BS.ByteString, Int))
-requestNodeData n (FN.CHK loc key extra _) = do
+requestNodeData n (FN.CHK loc key extra _) =
   case FN.chkExtraCompression extra of
     Left  e -> return $ Left $ "can't decompress CHK: " `T.append` e
     Right c -> do
@@ -447,7 +447,7 @@ requestNodeData n (FN.CHK loc key extra _) = do
           result <- atomically $ waitDelayed d
           
           case result of
-            Nothing  -> return $ Left $ "timeout waiting for CHK data"
+            Nothing  -> return $ Left "timeout waiting for CHK data"
             Just blk -> decrypt blk
             
 requestNodeData n (FN.SSK pkh key extra dn _) = do
@@ -467,12 +467,12 @@ requestNodeData n (FN.SSK pkh key extra dn _) = do
       result <- atomically $ waitDelayed d
           
       case result of
-        Nothing  -> return $ Left $ "timeout waiting for SSK data"
+        Nothing  -> return $ Left "timeout waiting for SSK data"
         Just blk -> return $ decrypt blk
 
 requestNodeData n (FN.USK pkh key extra dn dr _) = do
   let
-    dn' = dn `T.append` "-" `T.append` (T.pack $ show dr)
+    dn' = dn `T.append` "-" `T.append` T.pack (show dr)
     req = FN.SskRequest pkh (FN.sskEncryptDocname key dn') (FN.sskExtraCrypto extra)
     decrypt blk = FN.decryptDataBlock blk key $ FN.sskExtraCrypto extra
         
@@ -488,7 +488,7 @@ requestNodeData n (FN.USK pkh key extra dn dr _) = do
       result <- atomically $ waitDelayed d
           
       case result of
-        Nothing  -> return $ Left $ "timeout waiting for SSK data"
+        Nothing  -> return $ Left "timeout waiting for USK data"
         Just blk -> return $ decrypt blk
 
 -------------------------------------------------------------------------------------------------
@@ -529,7 +529,7 @@ request rmgr dr act = do
   let
     key = FN.dataRequestLocation dr
     checkTimeout (Delayed d) to = orElse
-      (isEmptyTMVar d >>= \e -> if e then retry else return ())
+      (isEmptyTMVar d >>= \e -> when e retry)
       (readTVar to    >>= \t -> if t
                                 then putTMVar d Nothing >> modifyTVar' (rmRequests rmgr) (HMap.delete key)
                                 else retry)
