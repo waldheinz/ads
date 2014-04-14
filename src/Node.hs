@@ -5,7 +5,7 @@ module Node (
   -- * our node
   Node, mkNode,
   requestNodeData, nodeArchives, nodePeers,
-  nodeFreenet,
+  nodeFreenet, nodeRouteStatus,
   
   -- * peers
   ConnectFunction, initPeers,
@@ -192,11 +192,26 @@ forwardResponse node mid msg = do
     Nothing -> logW $ "could not send response, message id unknown: " ++ show mid
     Just pn -> atomically $ enqMessage pn $ Response mid msg
 
-type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
+nodeRouteStatus :: Node a -> IO Value
+nodeRouteStatus node = do
+  now <- getTime
 
+  let
+    toState xs mid am = (x : xs) where
+      x = object
+          [ "messageId" .= mid
+          , "age"       .= timeDiff (amStarted am) now
+          ]
+  
+  msgs <- Map.foldlWithKey' toState [] <$> atomically (readTVar $ nodeActMsgs node)
+  
+  return $ object [ "messages" .= msgs ]
+    
 ----------------------------------------------------------------
 -- the peers list
 ----------------------------------------------------------------
+
+type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
 
 data Peers a = Peers
                { peersConnected     :: TVar [PeerNode a] -- ^ peers we're currently connected to
@@ -295,7 +310,7 @@ maintainConnections node connect = forever $ do
     known <- readTVar $ peersKnown peers
     cting <- readTVar $ peersConnecting peers
     connected <- readTVar $ peersConnected peers
-  
+    
     let
       result = (known \\ cting) \\ (map pnPeer connected)
 

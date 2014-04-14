@@ -13,29 +13,30 @@ import qualified Network.Wai as WAI
 import Network.Wai.UrlMap
 
 import Freenet
-import Freenet.Store
 import Node
 import Types
 
 restApi :: ToJSON a => Node a -> WAI.Application
 restApi node = mapUrls $
   mount "status"
-  (  mount "peers" (connStatus node)
+  (  mount "peers"   (connStatus node)
+ <|> mount "routing" (routeStatus node)   
  <|> mount "store"
-     (  mount "chk" (storeStatus $ fnChkStore $ nodeFreenet node)
-    <|> mount "ssk" (storeStatus $ fnSskStore $ nodeFreenet node)
+     (  mount "chk" (stateJsonResponse $ fnChkStore $ nodeFreenet node)
+    <|> mount "ssk" (stateJsonResponse $ fnSskStore $ nodeFreenet node)
      )
   ) 
   
 connStatus :: ToJSON a => Node a -> WAI.Application
 connStatus n = stateJsonResponse $ nodePeers n
 
-storeStatus :: StoreFile f -> WAI.Application
-storeStatus sf = stateJsonResponse sf
+routeStatus :: ToJSON a => Node a -> WAI.Application
+routeStatus n r = nodeRouteStatus n >>= \o -> jsonResponse o r
 
 stateJsonResponse :: ToStateJSON a => a -> WAI.Application
-stateJsonResponse o _ = do
-  sjson <- atomically $ toStateJSON o
-  return $ WAI.responseLBS status200 headers $ encode sjson
+stateJsonResponse o req = atomically (toStateJSON o) >>= \o' -> jsonResponse o' req
+
+jsonResponse :: ToJSON a => a -> WAI.Application
+jsonResponse o _ = return $ WAI.responseLBS status200 headers $ encode o
   where
     headers = [("Content-Type", "application/json")]
