@@ -32,8 +32,6 @@ import qualified Data.HashMap.Strict as HMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
 import qualified Data.Text as T
---import Data.Time.Clock ( diff  )
-import Data.Time.Clock.POSIX ( POSIXTime, getPOSIXTime )
 import System.FilePath ( (</>) )
 import System.Log.Logger
 
@@ -45,6 +43,7 @@ import qualified Freenet.Types as FN
 import qualified Freenet.URI as FN
 import Message as MSG
 import qualified NextBestOnce as NBO
+import Time
 import Types
 
 logI :: String -> IO ()
@@ -58,13 +57,13 @@ logW m = warningM "node" m
 -------------------------------------------------------------------------
 
 data Node a = Node
-            { nodePeers    :: Peers a
-            , nodeIdentity :: Peer a
-            , nodeMidGen   :: MessageIdGen
-            , nodeActMsgs  :: TVar (Map.Map MessageId (PeerNode a))          -- ^ messages we're currently routing
-            , nodeNbo      :: NBO.Node NodeId (RoutedMessage a) (PeerNode a) -- ^ our NBO identity for routing
-            , nodeFreenet  :: FN.Freenet a                                   -- ^ our freenet compatibility layer
-            , nodeArchives :: FN.ArchiveCache
+            { nodePeers       :: Peers a
+            , nodeIdentity    :: Peer a
+            , nodeMidGen      :: MessageIdGen
+            , nodeActMsgs     :: TVar (Map.Map MessageId (ActiveMessage a))     -- ^ messages we're currently routing
+            , nodeNbo         :: NBO.Node NodeId (RoutedMessage a) (PeerNode a) -- ^ our NBO identity for routing
+            , nodeFreenet     :: FN.Freenet a                                   -- ^ our freenet compatibility layer
+            , nodeArchives    :: FN.ArchiveCache
             , nodeChkRequests :: RequestManager FN.ChkRequest FN.ChkBlock
             , nodeSskRequests :: RequestManager FN.SskRequest FN.SskBlock
             }
@@ -77,18 +76,18 @@ mkNode self fn = do
   ac     <- FN.mkArchiveCache 10
   chkRm  <- atomically $ mkRequestManager
   sskRm  <- atomically $ mkRequestManager
-  
+
   let
     nbo = NBO.Node
         { NBO.location          = nodeId $ peerNodeInfo self
         , NBO.neighbours        = readTVar $ peersConnected peers
         , NBO.neighbourLocation = \np -> nodeId $ peerNodeInfo $ pnPeer np
         , NBO.popPred           = \msg -> messagePopPred node (rmId msg)
-        , NBO.addPred           = \msg n -> modifyTVar' msgMap $ Map.insert (rmId msg) n
+        , NBO.pushPred          = \msg -> messagePushPred node (rmId msg)
         , NBO.routingInfo       = rmInfo
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
-
+        
     node = Node peers self midgen msgMap nbo fn ac chkRm sskRm
 
   return node
@@ -135,6 +134,15 @@ handlePeerMessages node pn msg = do
     
   writeStores >> route
 
+-----------------------------------------------------------------------------------------------
+-- Routing
+-----------------------------------------------------------------------------------------------
+
+data ActiveMessage a = ActiveMessage
+                       { amStarted :: Timestamp     -- ^ when this message was sent off
+                       , amPreds   :: [PeerNode a]  -- ^ predecessors (where the message came from)
+                       }
+
 -- |
 -- Turn a Freenet @Key@ into a @NodeId@ by repacking the 32 bytes.
 keyToTarget :: FN.Key -> NodeId
@@ -147,29 +155,43 @@ mkRoutedMessage node target msg = atomically $ do
 
 sendRoutedMessage :: Show a => Node a -> RoutedMessage a -> Maybe (PeerNode a) -> IO ()
 sendRoutedMessage node msg prev = do
-  mlog <- atomically $ do
-    result <- NBO.route (nodeNbo node) prev msg
-    case result of
-      NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> return Nothing
-      NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> return Nothing
-      NBO.Fail                -> return $ Just $ logI $ "message failed fatally: " ++ show msg
-      
-  case mlog of
-    Nothing -> return ()
-    Just l  -> l
+  result <- NBO.route (nodeNbo node) prev msg
+    
+  case result of
+    NBO.Forward dest msg'   -> atomically $ enqMessage dest (Routed False msg')
+    NBO.Backtrack dest msg' -> atomically $ enqMessage dest (Routed True  msg')
+    NBO.Fail                -> logI $ "message failed fatally: " ++ show msg
+
+-- |
+-- 
+messagePushPred :: Node a -> MessageId -> PeerNode a -> IO ()
+messagePushPred node mid pn = do
+  now <- getTime
+  atomically $ modifyTVar' (nodeActMsgs node) $ Map.insertWith prepend mid $ ActiveMessage now [pn]
+  where
+    prepend (ActiveMessage _ (x:_)) (ActiveMessage sent xs) = ActiveMessage sent (x:xs)
+    prepend _ _ = error "messagePushPred: error in prepend"
 
 messagePopPred :: Node a -> MessageId -> STM (Maybe (PeerNode a))
 messagePopPred node mid = do
-  (tgt, m') <- Map.updateLookupWithKey (\_ _ -> Nothing) mid <$> readTVar (nodeActMsgs node)
+  let
+    update _ (ActiveMessage _     [])    = Nothing -- should not happen because 
+    update _ (ActiveMessage _    (_:[])) = Nothing -- of this
+    update _ (ActiveMessage sent (_:xs)) = Just $ ActiveMessage sent xs
+
+  (tgt, m') <- Map.updateLookupWithKey update mid <$> readTVar (nodeActMsgs node)
   writeTVar (nodeActMsgs node) m'
-  return tgt
   
+  case tgt of
+    Just (ActiveMessage _ (x:_)) -> return $ Just x
+    _                            -> return Nothing
+
 forwardResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
 forwardResponse node mid msg = do
   mtgt <- atomically $ messagePopPred node mid
   
   case mtgt of
-    Nothing -> return () -- logW $ "could not send response, message id unknown: " ++ show mid
+    Nothing -> logW $ "could not send response, message id unknown: " ++ show mid
     Just pn -> atomically $ enqMessage pn $ Response mid msg
 
 type ConnectFunction a = Peer a -> ((Either String (MessageIO a)) -> IO ()) -> IO ()
@@ -299,7 +321,7 @@ data PeerNode a
   = PeerNode
     { pnPeer        :: Peer a               -- ^ the peer
     , pnQueue       :: TBMQueue (Message a) -- ^ outgoing message queue
-    , pnLastMessage :: TVar POSIXTime       -- ^ when the last message was received
+    , pnLastMessage :: TVar Timestamp       -- ^ when the last message was received
     }
     
 instance (Show a) => Show (PeerNode a) where
@@ -310,7 +332,7 @@ instance Eq (PeerNode a) where
 
 instance ToJSON a => ToStateJSON (PeerNode a) where
   toStateJSON pn = do
-    lm <- readTVar $ pnLastMessage pn
+--    lm <- readTVar $ pnLastMessage pn
     return $ object
       [ "peer"        .= pnPeer pn
 --     , "lastMessage" .= (fromIntegral lm)
@@ -356,7 +378,7 @@ runPeerNode node (src, sink) expected = do
           Nothing -> return ()
           Just e -> when (e /= p) $ error "node identity mismatch"
 
-        pn <- liftIO $ getPOSIXTime >>= newTVarIO >>= \now -> return (PeerNode p mq now)
+        pn <- liftIO $ getTime >>= newTVarIO >>= \now -> return (PeerNode p mq now)
         
         liftIO $ do
           logI $ "got hello from " ++ show pn
@@ -371,7 +393,7 @@ runPeerNode node (src, sink) expected = do
               logI $ "lost connection to " ++ (show $ peerNodeInfo $ pnPeer pn)
               atomically $ removePeerNode (nodePeers node) pn)
           (C.mapM_ $ \m -> do
-              getPOSIXTime >>= atomically . (writeTVar $ pnLastMessage pn)
+              getTime >>= atomically . (writeTVar $ pnLastMessage pn)
               handlePeerMessages node pn m)
         
       x       -> error $ show x

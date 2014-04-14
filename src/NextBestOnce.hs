@@ -52,7 +52,7 @@ data Node l m n = Node
                   , neighbourLocation :: n -> l
                   , routingInfo       :: m -> RoutingInfo l
                   , updateRoutingInfo :: m -> RoutingInfo l -> m
-                  , addPred           :: m -> n -> STM ()
+                  , pushPred          :: m -> n -> IO ()
                   , popPred           :: m -> STM (Maybe n)
                   }
 
@@ -76,19 +76,20 @@ route :: (Location l)
   => Node l m n     -- ^ current node
   -> Maybe n        -- ^ previous node, or Nothing if we're backtracking or we're the originator
   -> m              -- ^ message being routed
-  -> STM (Result l m n)
-  
+  -> IO (Result l m n)
 route v prev msg = do
-    case prev of
-      Nothing -> return ()
-      Just p  -> addPred v msg p
-    
+  case prev of
+    Nothing -> return ()
+    Just p  -> pushPred v msg p
+
+  atomically $ do
+  
     let
       m = routingInfo v msg
       mm = updateRoutingInfo v msg $ mark m $ location v
       
     s <- filter (\n -> not $ marked m $ neighbourLocation v n) <$> neighbours v
-      
+  
     if (not . null) s
       then do
         let next = closest v (riTarget m) s
@@ -97,7 +98,7 @@ route v prev msg = do
           then return $ Forward next mm
           else return $ Forward next msg
       else do
-        -- check if we can backtrack
+      -- check if we can backtrack
       
         p <- popPred v msg
         case p of
