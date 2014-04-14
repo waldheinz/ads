@@ -39,7 +39,7 @@ instance Binary NodeId where
   get = NodeId <$> getByteString 32
   
 instance Show NodeId where
-  show nid = BSC.unpack $ HEX.encode (unNodeId nid)
+  show nid = BSC.unpack (HEX.encode $ unNodeId nid) ++ " (" ++ show (nodeIdToDouble nid) ++ ")"
 
 instance FromJSON NodeId where
   parseJSON (String s) = pure $ NodeId $ fst (HEX.decode $ encodeUtf8 s)
@@ -54,8 +54,11 @@ nodeIdToInteger (NodeId bs) = BS.foldl' (\i bb -> (i `shiftL` 8) + fromIntegral 
 maxNodeId :: Integer
 maxNodeId = 255 ^ (32 :: Integer)
 
+nodeIdToDouble :: NodeId -> Double
+nodeIdToDouble nid = fromRational $ (nodeIdToInteger nid) % maxNodeId
+
 instance NBO.Location NodeId where
-  toDouble nid = fromRational $ (nodeIdToInteger nid) % maxNodeId
+  toDouble = nodeIdToDouble
 
 mkNodeId' :: BS.ByteString -> NodeId
 mkNodeId' bs

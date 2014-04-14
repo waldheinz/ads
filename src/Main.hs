@@ -13,6 +13,7 @@ import qualified Data.Configurator as CFG
 import Network ( withSocketsDo )
 import Network.Wai.Handler.Warp as Warp
 import System.Directory ( getAppUserDataDirectory )
+import System.Environment ( getArgs )
 import System.FilePath ( (</>) )
 import System.Posix.Signals (installHandler, Handler(Catch), sigINT, sigTERM)
 
@@ -35,14 +36,16 @@ sigHandler s = do
 main :: IO ()
 main = withSocketsDo $ do
   RD.initRijndael
+
+  args <- getArgs
+  appDir <- if null args then getAppUserDataDirectory "ads" else return (head args)
   
   -- install signal handler for shutdown handling
   shutdown <- newTVarIO False
   void $ installHandler sigINT (Catch $ sigHandler shutdown) Nothing
   void $ installHandler sigTERM (Catch $ sigHandler shutdown) Nothing
-
+  
   -- initialize logging
-  appDir <- getAppUserDataDirectory "ads"
   cfg <- CFG.load [CFG.Required $ appDir </> "config"]
   LOG.initLogging $ CFG.subconfig "logging" cfg
   
@@ -60,6 +63,7 @@ main = withSocketsDo $ do
   node <- case mi of
     Left e -> logE ("error reading node identity: " ++ e) >> error "can't continue"
     Right ni -> do
+      infoM "main" $ show mi
       n <- mkNode ni fn
       initPeers n tcpConnect appDir
       nodeListen (CFG.subconfig "node.listen" cfg) n
