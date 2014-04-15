@@ -39,8 +39,8 @@ data SplitFile = SplitFile
                  , sfMime           :: Maybe Mime         -- ^ MIME type of the target data
                  } deriving ( Eq, Ord, Show )
 
-logI :: String -> IO ()
-logI m = infoM "freenet.splitfile" m
+logD :: String -> IO ()
+logD = debugM "freenet.splitfile"
 
 -- |
 -- Fetch the contents of a SplitFile. A SplitFile consists of @k@
@@ -55,7 +55,7 @@ fetchSplitFile fn (SplitFile comp dlen _ segs _) = do -- TODO: we're not returni
     k     = length $ filter (\(SplitFileSegment _ isd) -> isd) segs -- # of primary blocks
     blist = zip [0..] $ map (\(SplitFileSegment uri _) -> uri) segs
 
-  logI $ "fetch split file " ++ show total ++ "  " ++ show k
+  logD $ "fetch split file " ++ show total ++ "  " ++ show k
   
   todo    <- newTVarIO blist
   done    <- newTVarIO []
@@ -76,7 +76,7 @@ fetchSplitFile fn (SplitFile comp dlen _ segs _) = do -- TODO: we're not returni
           else let (idx, rng'') = randomR (0, length todo' - 1) rng'
                    (ys, zs) = splitAt idx todo'
                in do
-                 writeTVar todo $ ys ++ (tail zs)
+                 writeTVar todo $ ys ++ tail zs
                  writeTVar rng rng''
                  return $ Just $ head zs
                  
@@ -90,7 +90,7 @@ fetchSplitFile fn (SplitFile comp dlen _ segs _) = do -- TODO: we're not returni
               
           download
 
-  replicateM_ k $ forkIO $ download >> (atomically $ modifyTVar' running pred)
+  replicateM_ k $ forkIO $ download >> atomically (modifyTVar' running pred)
   
   -- wait until k blocks have been downloaded
 
@@ -104,7 +104,7 @@ fetchSplitFile fn (SplitFile comp dlen _ segs _) = do -- TODO: we're not returni
 
         if length done' + length todo' + running' >= k
           then retry
-          else return $ Left $ "could not download enough blocks " `T.append` (T.pack $ show (length done', length todo', running'))
+          else return $ Left $ "could not download enough blocks " `T.append` T.pack (show (length done', length todo', running'))
 
   case fetched of
     Left e   -> return $ Left e

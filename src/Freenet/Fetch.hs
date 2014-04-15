@@ -8,7 +8,6 @@ module Freenet.Fetch (
   fetchUri
   ) where
 
-import Control.Concurrent ( myThreadId )
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
@@ -21,16 +20,18 @@ import Freenet.SplitFile
 import Freenet.URI
 
 logI :: String -> IO ()
-logI m = infoM "freenet.fetch" m
-    
+logI = infoM "freenet.fetch"
+
+logD :: String -> IO ()
+logD = debugM "freenet.fetch"
+
 -- |
 -- Tries to fetch the specified URI, parses metadata if it's
 -- a control document, goes on fetching the referenced data,
 -- and finally returns everything
 fetchUri :: (Show a) => Node a -> URI -> IO (Either T.Text BSL.ByteString)
 fetchUri fn uri = do
-  tid <- myThreadId
-  logI $ "fetching " ++ show uri ++ " on " ++ show tid
+  logI $ "fetching " ++ show uri
   
   db <- requestNodeData fn uri
   
@@ -42,14 +43,7 @@ fetchUri fn uri = do
                             Left e   -> return $ Left e
                             Right md -> resolvePath fn (uriPath uri) md Nothing
                           else return $ Right pt'
-{-
-fetchRedirect :: Show a => Node a -> RedirectTarget -> [T.Text] -> IO (Either T.Text BSL.ByteString)
-fetchRedirect fn (RedirectKey _ uri) path = do
-  logI $ "fetch redirect to " ++ show uri ++ " with path " ++ show path
-  fetchUri fn $ appendUriPath uri path
-fetchRedirect fn (RedirectSplitFile sf) _ = fetchSplitFile fn sf
-  -}
-  
+
 -- | FIXME: watch out for infinite redirects
 resolvePath
   :: Show a => Node a
@@ -63,14 +57,14 @@ resolvePath fn [] md@(Manifest _) arch = logI "redirecting to default entry" >> 
 
 -- resolve in archive
 resolvePath _ _ (ArchiveInternalRedirect tgt _) (Just amap) = do
-  logI $ "resolving AIR to " ++ show tgt
+  logD $ "resolving AIR to " ++ show tgt
   case Map.lookup (T.unpack tgt) amap of
     Nothing -> return $ Left $ "could not locate \"" `T.append` tgt `T.append` "\" in archive"
     Just bs -> do
-      logI $ "found " ++ (show tgt) ++ " in archive"
+      logD $ "found " ++ show tgt ++ " in archive"
       return $ Right bs
 
-resolvePath fn ps (ArchiveMetadataRedirect tgt) (Just archive) = do
+resolvePath fn ps (ArchiveMetadataRedirect tgt) (Just archive) =
   case Map.lookup (T.unpack tgt) archive of
     Nothing -> return $ Left $ "could not locate metadata " `T.append` tgt `T.append` " in archive"
     Just bs -> case parseMetadata bs of
@@ -79,7 +73,7 @@ resolvePath fn ps (ArchiveMetadataRedirect tgt) (Just archive) = do
 
 -- follow simple redirects
 resolvePath fn ps (SimpleRedirect _ (RedirectKey _ uri)) arch = do
-  logI $ "following simple (key) redirect to " ++ (show uri) ++ " for " ++ show ps
+  logD $ "following simple (key) redirect to " ++ show uri ++ " for " ++ show ps
   
   db <- requestNodeData fn uri
 
@@ -96,32 +90,31 @@ resolvePath fn [] (SimpleRedirect _ (RedirectSplitFile sf)) _ = fetchSplitFile f
 
 -- resolve path in manifest
 resolvePath fn (p:ps) md@(Manifest me) arch = do
-  logI $ "resolving " ++ show p ++ " in manifest"
+  logD $ "resolving " ++ show p ++ " in manifest"
   
   case lookup p me of
     Nothing -> return $ Left $ "could not locate \"" `T.append` p `T.append` "\" in manifest"
     Just me' -> case me' of
       SymbolicShortlink tgt -> do
-        logI $ "following SSL to " ++ show tgt
+        logD $ "following SSL to " ++ show tgt
         resolvePath fn (tgt:ps) md arch
       x                     -> resolvePath fn ps x arch
-                             -- return $ Left $ T.concat ["can not resolve ", T.pack $ show x, " against a manifest"]
 
 resolvePath fn ps (ArchiveManifest atgt atype _ _) _ = do
-  logI $ "resolving archive manifest " ++ show atgt
+  logD $ "resolving archive manifest " ++ show atgt
   
   arch <- fetchArchive fn (nodeArchives fn) atgt atype
   
   case arch of
     Left e -> return $ Left e
     Right emap -> do
-      logI $ "archive entries: " ++ show (Map.keys emap)
+      logD $ "archive entries: " ++ show (Map.keys emap)
 
       case Map.lookup ".metadata" emap of
         Nothing -> return $ Left $ T.pack $ "no .metadata entry found in TAR archive: " ++ show ps
         Just mdbs -> case parseMetadata mdbs of
           Right md -> resolvePath fn ps md (Just emap)
-          x        -> return $ Left $ "error parsing manifest from TAR archive: " `T.append` (T.pack $ show x)
+          x        -> return $ Left $ "error parsing manifest from TAR archive: " `T.append` T.pack (show x)
 
 resolvePath fn ps (MultiLevel sf) arch = do
   sfc <- fetchSplitFile fn sf

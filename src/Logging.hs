@@ -6,7 +6,7 @@ module Logging (
 
   ) where
 
-import qualified Data.Configurator as CFG
+--import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import System.IO ( stderr )
 import System.Log.Handler.Simple
@@ -17,4 +17,4 @@ initLogging :: CFG.Config -> IO ()
 initLogging cfg = do
   h <- verboseStreamHandler stderr DEBUG
   updateGlobalLogger rootLoggerName $ setHandlers [h]
-  updateGlobalLogger rootLoggerName $ setLevel DEBUG
+  updateGlobalLogger rootLoggerName $ setLevel INFO
