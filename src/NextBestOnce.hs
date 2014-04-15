@@ -44,7 +44,9 @@ marked (RI ls _) l = l `elem` ls
 -- |
 -- mark the location as visited and get updated message
 mark :: (Location l) => RoutingInfo l -> l -> RoutingInfo l
-mark (RI ls t) l = RI (l:ls) t
+mark (RI ls t) l
+  | l `elem` ls = RI ls t   -- ^ it is possible to mark a message twice, but no use recording it
+  | otherwise = RI (l:ls) t
 
 data Node l m n = Node
                   { location          :: l

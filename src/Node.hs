@@ -314,7 +314,7 @@ maintainConnections node connect = forever $ do
   void $ forkIO $ connect shouldConnect $ \cresult ->
     case cresult of
       Left e -> do
-        logW $ "error connecting: " ++ e ++ " on " ++ show (peerId shouldConnect)
+        logD $ "error connecting: " ++ e ++ " on " ++ show (peerId shouldConnect)
         atomically $ modifyTVar' (nodeConnecting node) (filter (/= shouldConnect))
       
       Right msgio -> do
