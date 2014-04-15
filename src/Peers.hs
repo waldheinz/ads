@@ -1,4 +1,6 @@
 
+{-# LANGUAGE OverloadedStrings #-}
+
 module Peers (
   mkNodeInfo,
 
@@ -11,6 +13,8 @@ import Data.Aeson
 
 import Types
 
+-- |
+-- Extracts the persistable node information from a peer.
 mkNodeInfo :: Peer a -> STM (NodeInfo a)
 mkNodeInfo (Peer pid addrs) = do
   as <- readTVar addrs
@@ -19,12 +23,6 @@ mkNodeInfo (Peer pid addrs) = do
 ----------------------------------------------------------------
 -- Peers
 ----------------------------------------------------------------
-{-
-data PeerConnectState a
-  = Disconnected                               -- ^ the peer is currently disconnected
-  | Connecting ThreadId                        -- ^ we're currently trying to connect to this peer
-  | Connected ThreadId (TBMQueue (Message a))  -- ^ we're connected to the peer
--}
 
 class (FromJSON a, Show a, Eq a) => PeerAddress a where
 
@@ -34,19 +32,22 @@ class (FromJSON a, Show a, Eq a) => PeerAddress a where
 data Peer a = Peer
             { peerId        :: NodeId   -- ^ the static node info of this peer
             , peerAddresses :: TVar [a] -- ^ where this peer can be connected
---            , peerConnState :: TVar (PeerConnectState a)
             }
 
 instance Eq (Peer a) where
   (==) p1 p2 = (peerId p1) == (peerId p2)
 
 instance ToJSON a => ToStateJSON (Peer a) where
-  toStateJSON (Peer id adds) = do
-    return $ object []
+  toStateJSON (Peer pid adds) = do
+    adds' <- readTVar adds
+    
+    return $ object
+      [ "id"        .= pid
+      , "addresses" .= adds'
+      ]
   
 mkPeer :: PeerAddress a => NodeInfo a -> STM (Peer a)
 mkPeer (NodeInfo nid addrs) = do
   as <- newTVar addrs
---  cs <- newTVar Disconnected
   return $ Peer nid as
 

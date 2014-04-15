@@ -47,6 +47,9 @@ import Peers
 import Time
 import Types
 
+logD :: String -> IO ()
+logD = debugM "node"
+
 logI :: String -> IO ()
 logI = infoM "node"
 
@@ -59,6 +62,7 @@ logW = warningM "node"
 
 data Node a = Node
             { nodePeers       :: TVar [Peer a]                                  -- ^ the peers we know about
+            , nodeConnecting  :: TVar [Peer a]                                  -- ^ peers we're currently connecting to
             , nodePeerNodes   :: TVar [PeerNode a]                              -- ^ the nodes we're connected to
             , nodeIdentity    :: NodeInfo a                                     -- ^ our identity
             , nodeMidGen      :: MessageIdGen                                   -- ^ message id generator
@@ -73,6 +77,7 @@ data Node a = Node
 mkNode :: PeerAddress a => NodeInfo a -> FN.Freenet a -> ConnectFunction a -> IO (Node a)
 mkNode self fn connect = do
   peers  <- newTVarIO []
+  connecting <- newTVarIO [] -- peers we're currently connecting to
   pns    <- newTVarIO []
   midgen <- mkMessageIdGen
   msgMap <- newTVarIO Map.empty
@@ -91,7 +96,7 @@ mkNode self fn connect = do
         , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
         
-    node = Node peers pns self midgen msgMap nbo fn ac chkRm sskRm
+    node = Node peers connecting pns self midgen msgMap nbo fn ac chkRm sskRm
 
   void $ forkIO $ maintainConnections node connect
   
@@ -104,7 +109,7 @@ handlePeerMessages node pn (Direct GetPeerList) = atomically $ do
   enqMessage pn $ Direct $ PeerList nis
 
 handlePeerMessages node _  (Direct (PeerList ps)) = do
-  logI $ "got some peers: " ++ show ps
+  logD $ "got some peers: " ++ show ps
   atomically $ mapM_ (mergeNodeInfo node) ps
   
 handlePeerMessages node pn msg = do
@@ -265,9 +270,8 @@ mergeNodeInfo node ni = unless (ni == nodeIdentity node) $ do
 -- for message exchange, instead of just someone we know of.
 addPeerNode :: PeerAddress a => Node a -> PeerNode a -> STM ()
 addPeerNode node pn = do
-  ni <- mkNodeInfo $ pnPeer pn
-  mergeNodeInfo node ni
   modifyTVar' (nodePeerNodes node) ((:) pn)
+  mkNodeInfo (pnPeer pn) >>= mergeNodeInfo node
 
 -- |
 -- Removed a peer from the set of connected peers, when we decided
@@ -288,13 +292,12 @@ maintainConnections :: PeerAddress a => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
   -- we simply try to maintain a connection to all known peers for now
   delay <- registerDelay $ 2 * 1000 * 1000 -- limit outgoing connection rate
-  connecting <- newTVarIO [] -- peers we're currently connecting to
 
   shouldConnect <- atomically $ do
     readTVar delay >>= check
     
     known <- readTVar $ nodePeers node
-    cting <- readTVar $ connecting
+    cting <- readTVar $ nodeConnecting node
     connected <- readTVar $ nodePeerNodes node
     
     let
@@ -304,15 +307,15 @@ maintainConnections node connect = forever $ do
       then retry
       else do
         let result' = head result
-        modifyTVar' connecting ((:) result')
+        modifyTVar' (nodeConnecting node) ((:) result')
         return result'
 
-  logI $ "connecting to " ++ show (peerId shouldConnect)
+  logD $ "connecting to " ++ show (peerId shouldConnect)
   void $ forkIO $ connect shouldConnect $ \cresult ->
     case cresult of
       Left e -> do
         logW $ "error connecting: " ++ e ++ " on " ++ show (peerId shouldConnect)
-        atomically $ modifyTVar' connecting (filter (/= shouldConnect))
+        atomically $ modifyTVar' (nodeConnecting node) (filter (/= shouldConnect))
       
       Right msgio -> do
         logI $ "connected to " ++ show (peerId shouldConnect)
