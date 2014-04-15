@@ -9,6 +9,7 @@ module Net (
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
+import Control.Concurrent.STM
 import Control.Monad ( mzero )
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.Configurator as CFG
@@ -25,7 +26,7 @@ import System.IO.Error ( catchIOError )
 
 import Logging
 import Node
-import Types
+import Peers
 
 logI :: String -> IO ()
 logI m = infoM "net" m
@@ -68,7 +69,7 @@ nodeListen cfg node = do
 
 tcpConnect :: ConnectFunction TcpAddress
 tcpConnect peer handler = do
-  let addrs = peerAddresses peer
+  addrs <- atomically $ readTVar (peerAddresses peer)
   if null addrs
     then handler $ Left "no addresses"  -- TODO: deal with multiple adresses
     else let TcpAddress host port = head addrs in

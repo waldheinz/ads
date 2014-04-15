@@ -3,10 +3,10 @@
 
 module Types (
   NodeId, mkNodeId', NodeInfo(..),
-
+  
+  -- * state aware serialization
   ToStateJSON(..),
   
-  PeerAddress, Peer(..), mkPeer,
   UriFetch(..)
   ) where
 
@@ -27,6 +27,19 @@ import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
 
 import qualified Freenet.URI as FN
 import qualified NextBestOnce as NBO
+
+----------------------------------------------------------------------
+-- STM aware serialization
+----------------------------------------------------------------------
+
+class ToStateJSON a where
+  toStateJSON :: a -> STM Value
+
+instance ToStateJSON a => ToStateJSON [a] where
+  toStateJSON xs = toJSON <$> mapM toStateJSON xs
+
+instance ToStateJSON a => ToStateJSON (TVar a) where
+  toStateJSON v = readTVar v >>= toStateJSON
 
 ----------------------------------------------------------------------
 -- Node IDs
@@ -68,63 +81,29 @@ mkNodeId' bs
 ----------------------------------------------------------------------
 -- Node Info
 ----------------------------------------------------------------------
-  
-data NodeInfo = NodeInfo
-                { nodeId :: NodeId -- ^ the globally unique node ID of 256 bits
-                } deriving ( Eq, Show )
 
-instance Binary NodeInfo where
-  put ni = put $ nodeId ni
-  get = NodeInfo <$> get
+-- |
+-- The node information which can be exchanged between peers.
+data NodeInfo a = NodeInfo
+                  { nodeId        :: NodeId -- ^ the globally unique node ID of 256 bits
+                  , nodeAddresses :: [a]
+                  } deriving ( Eq, Show )
+
+instance Binary a => Binary (NodeInfo a) where
+  put ni = put (nodeId ni) >> put (nodeAddresses ni)
+  get = NodeInfo <$> get <*> get
   
-instance FromJSON NodeInfo where
-  parseJSON (Object v) = NodeInfo <$>
-                         v .: "id"
+instance FromJSON a => FromJSON (NodeInfo a) where
+  parseJSON (Object v) = NodeInfo
+                         <$> v .: "id"
+                         <*> v .: "addresses"
   parseJSON _ = mzero
 
-instance ToJSON NodeInfo where
+instance ToJSON a => ToJSON (NodeInfo a) where
   toJSON ni = object
-              [ "id" .= nodeId ni
+              [ "id"        .= nodeId ni
+              , "addresses" .= nodeAddresses ni
               ]
-
-class ToStateJSON a where
-  toStateJSON :: a -> STM Value
-
-instance ToStateJSON a => ToStateJSON [a] where
-  toStateJSON xs = toJSON <$> mapM toStateJSON xs
-
-----------------------------------------------------------------
--- Peers / Peer Nodes
-----------------------------------------------------------------
-
-class (FromJSON a, Show a, Eq a) => PeerAddress a where
-
-data Peer a = Peer
-            { peerNodeInfo  :: NodeInfo        -- ^ the static node info of this peer
-            , peerAddresses :: [a]             -- ^ where this peer can be connected
-            } deriving ( Show )
-
-instance Eq (Peer a) where
-  (==) p1 p2 = (peerNodeInfo p1) == (peerNodeInfo p2)
-
-instance FromJSON a => FromJSON (Peer a) where
-  parseJSON (Object v) = Peer <$>
-                         v .: "node" <*>
-                         v .: "addresses"
-  parseJSON _ = mzero
-
-instance ToJSON a => ToJSON (Peer a) where
-  toJSON p = object
-             [ "node"      .= peerNodeInfo p
-             , "addresses" .= peerAddresses p
-             ]
-
-instance (Binary a) => Binary (Peer a) where
-  put (Peer ni addr) = put ni >> put addr
-  get = Peer <$> get <*> get
-
-mkPeer :: PeerAddress a => NodeInfo -> [a] -> Peer a
-mkPeer ni addr = Peer ni addr
 
 -----------------------------------------------------------------
 -- Fetching Data

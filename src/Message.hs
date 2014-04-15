@@ -68,10 +68,10 @@ nextMessageId = readTBQueue . unMessageIdGen
 -- Messages are parametrised over the type of Peer addresses used, which could
 -- be either hostnames or message queues for simulations.
 data MessagePayload a
-     = Hello (Peer a)
+     = Hello (NodeInfo a)
      | Ping
      | GetPeerList                      -- ^ request for getting some peers which we might connect to
-     | PeerList [Peer a]                -- ^ response to @GetPeers@ request
+     | PeerList [NodeInfo a]            -- ^ response to @GetPeers@ request
      | FreenetChkRequest FN.ChkRequest
      | FreenetChkBlock   FN.ChkBlock
      | FreenetSskRequest FN.SskRequest

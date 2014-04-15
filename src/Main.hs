@@ -63,9 +63,9 @@ main = withSocketsDo $ do
   node <- case mi of
     Left e -> logE ("error reading node identity: " ++ e) >> error "can't continue"
     Right ni -> do
-      infoM "main" $ show mi
-      n <- mkNode ni fn
-      initPeers n tcpConnect appDir
+      infoM "main" $ show ni
+      n <- mkNode ni fn tcpConnect 
+      readPeers n appDir
       nodeListen (CFG.subconfig "node.listen" cfg) n
       return n
 
