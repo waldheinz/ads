@@ -295,7 +295,7 @@ removePeerNode node pn = do
 maintainConnections :: PeerAddress a => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
   -- we simply try to maintain a connection to all known peers for now
-  delay <- registerDelay $ 500 * 1000 -- limit outgoing connection rate to 2 per second
+  delay <- registerDelay $ 2 * 1000 * 1000 -- limit outgoing connection rate to 2 per second
 
   shouldConnect <- atomically $ do
     readTVar delay >>= check

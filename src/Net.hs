@@ -86,7 +86,7 @@ tcpConnect peer handler = do
               logI $ "connected to " ++ show (peerId peer) ++ " @ " ++ show x
               handler $ Right (appSource ad $= conduitDecode, conduitEncode =$ appSink ad))
         (\e -> do
-            logI $ "error connecting to " ++ show (peerId peer) ++ " @ " ++ show x ++ ": " ++ show e
+            logD $ "error connecting to " ++ show (peerId peer) ++ " @ " ++ show x ++ ": " ++ show e
             tryConnect xs)
         
   tryConnect addrs
