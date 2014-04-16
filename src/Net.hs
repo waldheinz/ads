@@ -28,6 +28,9 @@ import Logging
 import Node
 import Peers
 
+logD :: String -> IO ()
+logD = debugM "net"
+
 logI :: String -> IO ()
 logI m = infoM "net" m
 
@@ -75,8 +78,15 @@ tcpConnect peer handler = do
   
   let
     tryConnect [] = handler $ Left "no addresses left"
-    tryConnect ((TcpAddress host port) : xs) = catchIOError
-                                               (runTCPClient (clientSettings port $ BSC.pack host) $ \ad -> 
-                                                 handler $ Right (appSource ad $= conduitDecode, conduitEncode =$ appSink ad))
-                                               (\e -> tryConnect xs)
+    tryConnect (x@(TcpAddress host port) : xs) = do
+      catchIOError
+        (do
+            logD $ "connecting to " ++ show (peerId peer) ++ " @ " ++ show x
+            runTCPClient (clientSettings port $ BSC.pack host) $ \ad -> do
+              logI $ "connected to " ++ show (peerId peer) ++ " @ " ++ show x
+              handler $ Right (appSource ad $= conduitDecode, conduitEncode =$ appSink ad))
+        (\e -> do
+            logI $ "error connecting to " ++ show (peerId peer) ++ " @ " ++ show x ++ ": " ++ show e
+            tryConnect xs)
+        
   tryConnect addrs

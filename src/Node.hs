@@ -14,7 +14,7 @@ module Node (
   PeerNode, runPeerNode  
   ) where
 
-import Control.Applicative ( (<$>), (<*>) )
+import Control.Applicative ( (<$>) )
 import Control.Concurrent ( forkIO, killThread )
 import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
@@ -27,7 +27,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 import qualified Data.Conduit.TQueue as C
-import Data.List ( (\\), nub )
+import Data.List ( nub )
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
@@ -291,35 +291,37 @@ removePeerNode node pn = do
 maintainConnections :: PeerAddress a => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
   -- we simply try to maintain a connection to all known peers for now
-  delay <- registerDelay $ 2 * 1000 * 1000 -- limit outgoing connection rate
+  delay <- registerDelay $ 500 * 1000 -- limit outgoing connection rate to 2 per second
 
   shouldConnect <- atomically $ do
     readTVar delay >>= check
-    
+      
     known <- readTVar $ nodePeers node
     cting <- readTVar $ nodeConnecting node
     connected <- readTVar $ nodePeerNodes node
     
     let
-      result = (known \\ cting) \\ map pnPeer connected
+      cpeers = map pnPeer connected
+      result = [x | x <- known, not $ x `elem` cting, not $ x `elem` cpeers]
+--        filter (\p -> not $ p `elem` cpeers) $ filter (\p -> not $ p `elem` cting) known
 
     if null result
       then retry
       else do
         let result' = head result
         modifyTVar' (nodeConnecting node) ((:) result')
+    
         return result'
 
   logD $ "connecting to " ++ show (peerId shouldConnect)
+  atomically $         modifyTVar' (nodePeers node) (\pls -> case pls of
+                                                        [] -> []
+                                                        (p:ps) -> ps ++ [p])
+
   void $ forkIO $ connect shouldConnect $ \cresult ->
     case cresult of
-      Left e -> do
-        logI $ "error connecting: " ++ e ++ " on " ++ show (peerId shouldConnect)
-        atomically $ modifyTVar' (nodeConnecting node) (filter (/= shouldConnect))
-      
-      Right msgio -> do
-        logI $ "connected to " ++ show (peerId shouldConnect)
-        runPeerNode node msgio (Just $ peerId shouldConnect)
+      Left _      -> atomically $ modifyTVar' (nodeConnecting node) (filter (/= shouldConnect))
+      Right msgio -> runPeerNode node msgio (Just $ peerId shouldConnect)
 
 -------------------------------------------------------------------------
 -- Peer Nodes
@@ -394,7 +396,7 @@ runPeerNode node (src, sink) expected = do
           getTime >>= newTVarIO >>= \now -> return (PeerNode p mq now)
         
         liftIO $ do
-          logI $ "got hello from " ++ show pn
+          logD $ "got hello from " ++ show pn
           
           atomically $ do
             unless (isJust expected) $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
