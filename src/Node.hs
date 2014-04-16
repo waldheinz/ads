@@ -321,9 +321,10 @@ maintainConnections node connect = forever $ do
                                                 [] -> []
                                                 (p:ps) -> ps ++ [p])
 
-  void $ forkIO $ connect shouldConnect $ \cresult ->
+  void $ forkIO $ connect shouldConnect $ \cresult -> do
+    atomically $ modifyTVar' (nodeConnecting node) (filter (/= shouldConnect))
     case cresult of
-      Left _      -> atomically $ modifyTVar' (nodeConnecting node) (filter (/= shouldConnect))
+      Left _      -> return ()
       Right msgio -> runPeerNode node msgio (Just $ peerId shouldConnect)
 
 -------------------------------------------------------------------------
@@ -407,7 +408,7 @@ runPeerNode node (src, sink) expected = do
             addPeerNode node pn
 
         case merr of
-            Just err -> liftIO $ atomically $ writeTBMQueue mq (Direct $ Bye $ T.unpack err)
+            Just err -> error (T.unpack err) -- liftIO $ atomically $ writeTBMQueue mq (Direct $ Bye $ T.unpack err)
             Nothing -> C.addCleanup
               (\_ -> do
                   logI $ "lost connection to " ++ show (peerId $ pnPeer pn)
