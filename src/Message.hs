@@ -76,6 +76,7 @@ data MessagePayload a
      | FreenetChkBlock   FN.ChkBlock
      | FreenetSskRequest FN.SskRequest
      | FreenetSskBlock   FN.SskBlock
+     | Bye String
      deriving ( Show )
 
 instance (Binary a) => Binary (MessagePayload a) where
@@ -87,6 +88,7 @@ instance (Binary a) => Binary (MessagePayload a) where
   put (FreenetChkBlock blk)  = putHeader 6 >> put blk
   put (FreenetSskRequest dr) = putHeader 7 >> put dr
   put (FreenetSskBlock blk)  = putHeader 8 >> put blk
+  put (Bye msg)              = putHeader 9 >> put msg
   
   get = do
     t <- getWord8
@@ -100,6 +102,7 @@ instance (Binary a) => Binary (MessagePayload a) where
       6 -> FreenetChkBlock <$> get
       7 -> FreenetSskRequest <$> get
       8 -> FreenetSskBlock <$> get
+      9 -> Bye <$> get
       _ -> fail $ "unknown message type " ++ show t
 
 

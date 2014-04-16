@@ -268,10 +268,14 @@ mergeNodeInfo node ni = unless (nodeId ni == (nodeId . nodeIdentity) node) $ do
 -- |
 -- Adds a peer to the set of connected peers. It is now a partner
 -- for message exchange, instead of just someone we know of.
-addPeerNode :: PeerAddress a => Node a -> PeerNode a -> STM ()
+addPeerNode :: PeerAddress a => Node a -> PeerNode a -> STM (Maybe T.Text)
 addPeerNode node pn = do
-  modifyTVar' (nodePeerNodes node) ((:) pn)
   mkNodeInfo (pnPeer pn) >>= mergeNodeInfo node
+  connected <- readTVar $ nodePeerNodes node
+  
+  if pn `elem` connected -- this can happen on simultaneous connect from both sides
+    then return $ Just "already connected"
+    else writeTVar (nodePeerNodes node) (pn : connected) >> return Nothing
 
 -- |
 -- Removed a peer from the set of connected peers, when we decided
@@ -295,7 +299,7 @@ maintainConnections node connect = forever $ do
 
   shouldConnect <- atomically $ do
     readTVar delay >>= check
-      
+    
     known <- readTVar $ nodePeers node
     cting <- readTVar $ nodeConnecting node
     connected <- readTVar $ nodePeerNodes node
@@ -303,7 +307,6 @@ maintainConnections node connect = forever $ do
     let
       cpeers = map pnPeer connected
       result = [x | x <- known, not $ x `elem` cting, not $ x `elem` cpeers]
---        filter (\p -> not $ p `elem` cpeers) $ filter (\p -> not $ p `elem` cting) known
 
     if null result
       then retry
@@ -314,9 +317,9 @@ maintainConnections node connect = forever $ do
         return result'
 
   logD $ "connecting to " ++ show (peerId shouldConnect)
-  atomically $         modifyTVar' (nodePeers node) (\pls -> case pls of
-                                                        [] -> []
-                                                        (p:ps) -> ps ++ [p])
+  atomically $ modifyTVar' (nodePeers node) (\pls -> case pls of
+                                                [] -> []
+                                                (p:ps) -> ps ++ [p])
 
   void $ forkIO $ connect shouldConnect $ \cresult ->
     case cresult of
@@ -395,23 +398,25 @@ runPeerNode node (src, sink) expected = do
           p <- atomically $ mkPeer ni
           getTime >>= newTVarIO >>= \now -> return (PeerNode p mq now)
         
-        liftIO $ do
-          logD $ "got hello from " ++ show pn
+        merr <- liftIO $ do
+          logI $ "got hello from " ++ show pn
           
           atomically $ do
             unless (isJust expected) $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
             writeTBMQueue mq (Direct GetPeerList)
             addPeerNode node pn
-            
-        C.addCleanup
-          (\_ -> do
-              logI $ "lost connection to " ++ show (peerId $ pnPeer pn)
-              atomically $ removePeerNode node pn)
-          (C.mapM_ $ \m -> do
-              getTime >>= atomically . writeTVar (pnLastMessage pn)
-              handlePeerMessages node pn m)
+
+        case merr of
+            Just err -> liftIO $ atomically $ writeTBMQueue mq (Direct $ Bye $ T.unpack err)
+            Nothing -> C.addCleanup
+              (\_ -> do
+                  logI $ "lost connection to " ++ show (peerId $ pnPeer pn)
+                  atomically $ removePeerNode node pn)
+              (C.mapM_ $ \m -> do
+                  getTime >>= atomically . writeTVar (pnLastMessage pn)
+                  handlePeerMessages node pn m)
         
-      x       -> error $ show x
+      x       -> error $ "unexpected message: " ++ show x
         
   C.addCleanup (\_ -> killThread tid) (C.sourceTBMQueue mq) C.$$ sink
 
