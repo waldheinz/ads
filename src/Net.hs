@@ -67,13 +67,16 @@ nodeListen cfg node = do
 
   infoM "net" $ "node listening on " ++ host ++ ":" ++ show port
 
+-- |
+-- Connects to a @Peer@ using TCP sockets.
 tcpConnect :: ConnectFunction TcpAddress
 tcpConnect peer handler = do
-  addrs <- atomically $ readTVar (peerAddresses peer)
-  if null addrs
-    then handler $ Left "no addresses"  -- TODO: deal with multiple adresses
-    else let TcpAddress host port = head addrs in
-      catchIOError
-           (runTCPClient (clientSettings port $ BSC.pack host) $ \ad -> 
-               handler $ Right (appSource ad $= conduitDecode, conduitEncode =$ appSink ad))
-           (\e -> handler $ Left $ show e)
+  addrs <- atomically . readTVar $ peerAddresses peer
+  
+  let
+    tryConnect [] = handler $ Left "no addresses left"
+    tryConnect ((TcpAddress host port) : xs) = catchIOError
+                                               (runTCPClient (clientSettings port $ BSC.pack host) $ \ad -> 
+                                                 handler $ Right (appSource ad $= conduitDecode, conduitEncode =$ appSink ad))
+                                               (\e -> tryConnect xs)
+  tryConnect addrs
