@@ -248,7 +248,7 @@ readPeers node dataDir = do
 -- adding new ones or just updating addresses of the ones we already
 -- know about.
 mergeNodeInfo :: PeerAddress a => Node a -> NodeInfo a -> STM ()
-mergeNodeInfo node ni = unless (ni == nodeIdentity node) $ do
+mergeNodeInfo node ni = unless (nodeId ni == (nodeId . nodeIdentity) node) $ do
   p   <- mkPeer ni
 
   let
