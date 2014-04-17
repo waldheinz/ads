@@ -103,5 +103,5 @@ integerLogBase b i =
         in  doDiv (i `div` (b^l)) l
 
 instance FreenetBase64 Integer where
-  fromBase64' s = fromBase64' s >>= \bs -> Right (bs2i bs)
+  fromBase64' s = fromBase64' s >>= \bs -> Right (bsToPosI bs)
   toBase64'     = toBase64' . i2bs

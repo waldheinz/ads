@@ -24,6 +24,8 @@ import Freenet.Chk
 import Freenet.Ssk
 import Freenet.Types
 
+import Debug.Trace
+
 data Companion = Companion
                  { cHandle :: Handle
                  , cLock   :: Lock.Lock
@@ -70,7 +72,7 @@ initCompanion cfg chkHandler sskHandler = do
             pubkey <- fromBase64' pktxt >>= mkPubKey
             hdr    <- fromBase64' hstr  >>= mkSskHeader
             d      <- fromBase64' rest''
-            mkSskBlock loc hdr d pubkey
+            traceShow (loc, hdr, pubkey) $ mkSskBlock loc hdr d pubkey
 
         case df of
           Left e  -> putStrLn $ "could not parse SSK found response: " ++ T.unpack e
