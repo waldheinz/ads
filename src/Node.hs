@@ -261,9 +261,7 @@ mergeNodeInfo node ni = unless (nodeId ni == (nodeId . nodeIdentity) node) $ do
       | x == p = merge x p >> return (x:xs)
       | otherwise = go xs >>= \xs' -> return (x:xs')
   
-  ps  <- readTVar $ nodePeers node
-  ps' <- go ps
-  writeTVar (nodePeers node) ps'
+  readTVar (nodePeers node) >>= go >>= writeTVar (nodePeers node)
   
 -- |
 -- Adds a peer to the set of connected peers. It is now a partner
@@ -283,8 +281,8 @@ addPeerNode node pn = do
 -- was lost.
 removePeerNode :: Node a -> PeerNode a -> STM ()
 removePeerNode node pn = do
-  modifyTVar' (nodePeerNodes node) $ filter (/= pn)         -- ^ it's no longer connected
-  modifyTVar' (nodeActMsgs node)   $ Map.mapMaybe dropPreds -- ^ and we can drop messages routed for this node
+  modifyTVar' (nodePeerNodes node) $ filter (/= pn)         -- it's no longer connected
+  modifyTVar' (nodeActMsgs node)   $ Map.mapMaybe dropPreds -- and we can drop messages routed for this node
   where
     dropPreds am
       | null xs'  = Nothing
@@ -306,7 +304,7 @@ maintainConnections node connect = forever $ do
     
     let
       cpeers = map pnPeer connected
-      result = [x | x <- known, not $ x `elem` cting, not $ x `elem` cpeers]
+      result = [x | x <- known, x `notElem` cting, x `notElem` cpeers]
 
     if null result
       then retry
@@ -380,45 +378,64 @@ runPeerNode
   :: (PeerAddress a)
   => Node a
   -> MessageIO a    -- ^ the (source, sink) pair to talk to the peer
-  -> Maybe (NodeId)
+  -> Maybe NodeId
   -> IO ()
 runPeerNode node (src, sink) expected = do
-  mq <- newTBMQueueIO 50
+  mq <- newTBMQueueIO 10
   
   -- enqueue the obligatory Hello message, if this is an outgoing connection
   when (isJust expected) $ atomically $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
+
+  let
+    enqDirect msg = writeTBMQueue mq $ Direct msg
+    byeError reason = liftIO $ do
+      logI $ "dropping connection: " ++ T.unpack reason
+      atomically $ enqDirect (Bye $ T.unpack reason) >> closeTBMQueue mq
+    
+    checkId pn = case expected of
+      Nothing -> Nothing
+      Just e  -> if e /= nid then Just "node identity mismatch" else Nothing
+      where
+        nid = peerId $ pnPeer pn
+        
+    mkPn ninfo now = do
+      p <- mkPeer ninfo
+      lm <- newTVar now
+      return $ PeerNode p mq lm
+
+    handleConnection result = case result of
+      Left err -> byeError err
+      Right pn -> do
+        liftIO $ logI $ "handshake completed with " ++ show (peerId $ pnPeer pn)
+        
+        C.addCleanup
+          (\_ -> do
+              logI $ "lost connection to " ++ show (peerId $ pnPeer pn)
+              atomically $ removePeerNode node pn)
+          (C.mapM_ $ \m -> do
+              getTime >>= atomically . writeTVar (pnLastMessage pn)
+              handlePeerMessages node pn m)
   
+    handshake ni = liftIO $ do
+      now <- getTime
+          
+      atomically $ do
+        pn <- mkPn ni now
+        
+        case checkId pn of
+          Just e  -> return $ Left e
+          Nothing -> addPeerNode node pn >>= \ea -> case ea of
+            Just e' -> return $ Left e'
+            Nothing -> do
+              unless (isJust expected) (enqDirect $ Hello $ nodeIdentity node)
+              enqDirect GetPeerList
+              return $ Right pn
+      
   tid <- forkIO $ src C.$$ C.awaitForever $ \msg ->
     case msg of
-      Direct (Hello ni) -> do
-        case expected of
-          Nothing -> return ()
-          Just e -> when (e /= (nodeId ni)) $ error "node identity mismatch"
-          
-        pn <- liftIO $ do
-          p <- atomically $ mkPeer ni
-          getTime >>= newTVarIO >>= \now -> return (PeerNode p mq now)
-        
-        merr <- liftIO $ do
-          logI $ "got hello from " ++ show pn
-          
-          atomically $ do
-            unless (isJust expected) $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
-            writeTBMQueue mq (Direct GetPeerList)
-            addPeerNode node pn
-
-        case merr of
-            Just err -> error (T.unpack err) -- liftIO $ atomically $ writeTBMQueue mq (Direct $ Bye $ T.unpack err)
-            Nothing -> C.addCleanup
-              (\_ -> do
-                  logI $ "lost connection to " ++ show (peerId $ pnPeer pn)
-                  atomically $ removePeerNode node pn)
-              (C.mapM_ $ \m -> do
-                  getTime >>= atomically . writeTVar (pnLastMessage pn)
-                  handlePeerMessages node pn m)
-        
-      x       -> error $ "unexpected message: " ++ show x
-        
+      Direct (Hello ni) -> handshake ni >>= handleConnection
+      x                 -> byeError (T.pack $ "unexpected message: " ++ show x)
+  
   C.addCleanup (\_ -> killThread tid) (C.sourceTBMQueue mq) C.$$ sink
 
 instance (Show a) => UriFetch (Node a) where
