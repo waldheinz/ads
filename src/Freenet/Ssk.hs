@@ -34,8 +34,6 @@ import Freenet.Pcfb
 import qualified Freenet.Rijndael as RD
 import Freenet.Types
 
-import Debug.Trace
-
 --------------------------------------------------------------------------------
 -- Header
 --------------------------------------------------------------------------------
@@ -122,14 +120,13 @@ mkSskBlock
   -> PubKey                   -- ^ public key needed for verifying the signature
   -> Either T.Text SskBlock
 mkSskBlock k h d pk
-  | traceShow ("ssk hashes", overallHash, overallHash') False = undefined
   | sskHeaderHashId h /= 1 = Left "hash must be SHA-256"
-  | not (DSA.verify id (unPublicKey pk) sig overallHash)
-    = Left "signature did not verify"
-  | otherwise = Right  $ SskBlock k pk h d
+  | DSA.verify dsaMod (unPublicKey pk) sig overallHash = result -- yes, we really have to try two times because Freenet has this
+  | DSA.verify id (unPublicKey pk) sig overallHash = result     -- strange bug I don't really understand. :-/
+  | otherwise = Left "signature did not verify"
   where
+    result = Right  $ SskBlock k pk h d
     overallHash = BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [hashHeader, dataHash]
-    overallHash' = BS.singleton ((BS.head overallHash) .&. 0x7f) `BS.append` (BS.tail overallHash)
     dataHash =  BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromStrict d
     hashHeader = BS.take 72 $ unSskHeader h
     sig = uncurry DSA.Signature $ sskHeaderRS h
