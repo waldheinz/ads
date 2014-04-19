@@ -15,17 +15,16 @@ module Node (
   ) where
 
 import Control.Applicative ( (<$>) )
-import Control.Concurrent ( forkIO, killThread )
+import Control.Concurrent ( forkIO, threadDelay )
 import Control.Concurrent.STM as STM
 import Control.Concurrent.STM.TBMQueue as STM
+import Control.Exception.Base ( finally ) 
 import Control.Monad ( forever, unless, void, when )
-import Control.Monad.IO.Class ( liftIO )
 
 import Data.Aeson
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
-import qualified Data.Conduit.List as C
 import qualified Data.Conduit.TQueue as C
 import Data.List ( nub )
 import qualified Data.HashMap.Strict as HMap
@@ -33,7 +32,9 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
 import qualified Data.Text as T
 import System.FilePath ( (</>) )
+import System.IO.Error ( catchIOError )
 import System.Log.Logger
+import System.Timeout ( timeout )
 
 import qualified Freenet as FN
 import qualified Freenet.Archive as FN
@@ -99,6 +100,7 @@ mkNode self fn connect = do
     node = Node peers connecting pns self midgen msgMap nbo fn ac chkRm sskRm
 
   void $ forkIO $ maintainConnections node connect
+--  void $ forkIO $ ensureConnectionsAlive node
   
   return node
 
@@ -289,7 +291,7 @@ removePeerNode node pn = do
       | otherwise = Just am { amPreds = xs' }
       where
         xs' = filter (/= pn) (amPreds am)
-        
+
 maintainConnections :: PeerAddress a => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
   -- we simply try to maintain a connection to all known peers for now
@@ -311,7 +313,6 @@ maintainConnections node connect = forever $ do
       else do
         let result' = head result
         modifyTVar' (nodeConnecting node) ((:) result')
-    
         return result'
 
   logD $ "connecting to " ++ show (peerId shouldConnect)
@@ -320,7 +321,6 @@ maintainConnections node connect = forever $ do
                                                 (p:ps) -> ps ++ [p])
 
   void $ forkIO $ connect shouldConnect $ \cresult -> do
-    atomically $ modifyTVar' (nodeConnecting node) (filter (/= shouldConnect))
     case cresult of
       Left _      -> return ()
       Right msgio -> runPeerNode node msgio (Just $ peerId shouldConnect)
@@ -335,14 +335,14 @@ data PeerNode a
   = PeerNode
     { pnPeer        :: Peer a               -- ^ the peer
     , pnQueue       :: TBMQueue (Message a) -- ^ outgoing message queue
-    , pnLastMessage :: TVar Timestamp       -- ^ when the last message was received
+--    , pnLastMessage :: TVar Timestamp       -- ^ when the last message was received
     }
     
 instance (Show a) => Show (PeerNode a) where
   show n = "Node {peer = " ++ show (peerId $ pnPeer n) ++ " }"
 
 instance Eq (PeerNode a) where
-  (PeerNode p1 _ _) == (PeerNode p2 _ _) = p1 == p2
+  (PeerNode p1 _) == (PeerNode p2 _) = p1 == p2
 
 instance ToJSON a => ToStateJSON (PeerNode a) where
   toStateJSON pn = do
@@ -357,18 +357,6 @@ instance ToJSON a => ToStateJSON (PeerNode a) where
 enqMessage :: PeerNode a -> Message a -> STM ()
 enqMessage n = writeTBMQueue (pnQueue n)
 
-{-
-doPing :: PeerNode a -> IO ()
-doPing pn = do
-  to <- registerDelay $ 10 * 1000 * 1000
-  now <- getPOSIXTime
-  
-  atomically $ orElse
-    (readTVar (pnLastMessage pn) >>= \last -> if (now - last < 20) then retry else return ())
-    (readTVar to >>= \timeout -> if timeout then enqMessage pn (Direct Ping) else retry)
-
--}
-
 ------------------------------------------------------------------------------
 -- Handshake
 ------------------------------------------------------------------------------
@@ -381,16 +369,15 @@ runPeerNode
   -> Maybe NodeId
   -> IO ()
 runPeerNode node (src, sink) expected = do
-  mq <- newTBMQueueIO 10
-  
-  -- enqueue the obligatory Hello message, if this is an outgoing connection
-  when (isJust expected) $ atomically $ writeTBMQueue mq (Direct $ Hello $ nodeIdentity node)
+  outq <- newTBMQueueIO 10
+  inq  <- newTBMQueueIO 10
 
   let
-    enqDirect msg = writeTBMQueue mq $ Direct msg
-    byeError reason = liftIO $ do
+    enqDirect msg = writeTBMQueue outq $ Direct msg
+    
+    byeError reason = do
       logI $ "dropping connection: " ++ T.unpack reason
-      atomically $ enqDirect (Bye $ T.unpack reason) >> closeTBMQueue mq
+      atomically $ enqDirect (Bye $ T.unpack reason) >> closeTBMQueue outq
     
     checkId pn = case expected of
       Nothing -> Nothing
@@ -398,29 +385,22 @@ runPeerNode node (src, sink) expected = do
       where
         nid = peerId $ pnPeer pn
         
-    mkPn ninfo now = do
+    mkPn ninfo = do
       p <- mkPeer ninfo
-      lm <- newTVar now
-      return $ PeerNode p mq lm
+      return $ PeerNode p outq
 
-    handleConnection result = case result of
-      Left err -> byeError err
-      Right pn -> do
-        liftIO $ logI $ "handshake completed with " ++ show (peerId $ pnPeer pn)
-        
-        C.addCleanup
-          (\_ -> do
-              logI $ "lost connection to " ++ show (peerId $ pnPeer pn)
-              atomically $ removePeerNode node pn)
-          (C.mapM_ $ \m -> do
-              getTime >>= atomically . writeTVar (pnLastMessage pn)
-              handlePeerMessages node pn m)
-  
-    handshake ni = liftIO $ do
-      now <- getTime
-          
-      atomically $ do
-        pn <- mkPn ni now
+    -- inject a ping every 30s to prevent timeout on the other side
+    sendPings = do
+      to <- registerDelay $ 30 * 1000 * 1000
+      closed <- atomically $
+                (isClosedTBMQueue outq >>= \c -> if c then return True else retry) `orElse`
+                (isEmptyTBMQueue outq  >>= \e -> if e then retry else return False) `orElse`
+                (readTVar to >>= \t -> if t then writeTBMQueue outq (Direct Ping) >> return False else retry)
+                
+      unless closed sendPings
+    
+    handshake ni = atomically $ do
+        pn <- mkPn ni
         
         case checkId pn of
           Just e  -> return $ Left e
@@ -430,14 +410,60 @@ runPeerNode node (src, sink) expected = do
               unless (isJust expected) (enqDirect $ Hello $ nodeIdentity node)
               enqDirect GetPeerList
               return $ Right pn
-      
-  tid <- forkIO $ src C.$$ C.awaitForever $ \msg ->
-    case msg of
-      Direct (Hello ni) -> handshake ni >>= handleConnection
-      x                 -> byeError (T.pack $ "unexpected message: " ++ show x)
-  
-  C.addCleanup (\_ -> killThread tid) (C.sourceTBMQueue mq) C.$$ sink
 
+    handleMessages pn = do
+      timeo <- registerDelay $ 60 * 1000 * 1000 -- we want some message at least every minute
+      msg   <- atomically $ orElse
+               (readTVar timeo   >>= \to -> if to then return (Left "timeout waiting for message") else retry)
+               (readTBMQueue inq >>= \mmsg -> case mmsg of
+                   Nothing -> return $ Left "connecting closed waiting for message"
+                   Just m  -> return $ Right m)
+  
+      case msg of
+        Left err -> byeError err
+        Right m  -> handlePeerMessages node pn m >> handleMessages pn
+
+  void $ forkIO $ catchIOError
+    (src C.$$ (C.sinkTBMQueue inq True))
+    (\_ -> atomically $ closeTBMQueue inq >> closeTBMQueue outq)
+    
+  void $ forkIO $ C.addCleanup
+    (\_ -> atomically $ closeTBMQueue inq)
+    (C.sourceTBMQueue outq) C.$$ sink
+
+  -- enqueue the obligatory Hello message, if this is an outgoing connection
+  when (isJust expected) $ atomically . enqDirect $ Hello $ nodeIdentity node
+  
+  -- wait for peer's hello (or timeout)
+  mnode <- timeout (5 * 1000 * 1000) $ do
+    msg <- atomically $ readTBMQueue inq
+    
+    -- we'd like to see a hello message, everything else indicates failure
+    case msg of
+      Just (Direct (Hello ni)) -> handshake ni
+      Nothing                  -> return $ Left $ "connection closed during handshake"
+      Just (Direct (Bye r))    -> return $ Left $ T.pack $ "connection rejected: " ++ r
+      Just x                   -> return $ Left $ T.pack $ "unexpected message " ++ show x
+
+  -- now the peer has either been promoted to a PeerNode (in handshake), or it will
+  -- never be. anyway, it's safe to say we've left "connecting" state for this one
+  case expected of
+    Nothing -> return ()
+    Just x  -> atomically $ modifyTVar' (nodeConnecting node) (filter (\p -> peerId p /= x))
+  
+  case mnode of
+    Nothing         -> logI $ "timeout waiting for peer hello"
+    Just (Left e)   -> logI $ "handshake failed: " ++ T.unpack e
+    Just (Right pn) -> do
+      logI $ "finished handshake with " ++ show pn
+      void $ forkIO $ sendPings
+      finally (handleMessages pn) (atomically $ removePeerNode node pn)
+
+  mapM_ (atomically . closeTBMQueue) [inq, outq]
+  
+  -- let outgoing queue flush
+  threadDelay $ 1000 * 1000
+  
 instance (Show a) => UriFetch (Node a) where
   getUriData = requestNodeData
 
