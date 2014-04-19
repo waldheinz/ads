@@ -81,7 +81,7 @@ tcpConnect peer handler = do
     tryConnect (x@(TcpAddress host port) : xs) = do
       catchIOError
         (do
-            logI $ "connecting to " ++ show (peerId peer) ++ " @ " ++ show x
+            logD $ "connecting to " ++ show (peerId peer) ++ " @ " ++ show x
             runTCPClient (clientSettings port $ BSC.pack host) $ \ad -> do
               logI $ "connected to " ++ show x
               handler $ Right (appSource ad $= conduitDecode, conduitEncode =$ appSink ad))

@@ -105,6 +105,7 @@ mkNode self fn connect = do
   return node
 
 handlePeerMessages :: PeerAddress a => Node a -> PeerNode a -> Message a -> IO ()
+handlePeerMessages _ pn (Direct Ping) = logI $ "ping from " ++ show pn
 
 handlePeerMessages node pn (Direct GetPeerList) = atomically $ do
   nis <- readTVar (nodePeers node) >>= mapM mkNodeInfo
