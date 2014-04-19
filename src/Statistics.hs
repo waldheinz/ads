@@ -35,7 +35,7 @@ histInc h l = do
   (minBin, maxBin) <- getBounds a
   
   let
-    idx = max minBin $ min maxBin $ minBin + (round $ l * (fromIntegral maxBin))
+    idx = max minBin $ min maxBin $ minBin + (floor $ l * (fromIntegral maxBin + 1))
   
   v <- readArray a idx
   writeArray a idx (v + 1)
