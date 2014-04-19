@@ -10,9 +10,8 @@ module Freenet.Store (
   ) where
 
 import qualified Control.Concurrent.Lock as Lock
-import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
-import Control.Monad ( void )
+import Control.Monad ( void, when )
 import Data.Aeson
 import Data.Binary
 import Data.Binary.Get ( runGetOrFail )
@@ -74,22 +73,27 @@ mkStoreFile sp fileName count = do
   rds  <- newTVarIO 0
   scs  <- newTVarIO 0
   lck  <- Lock.new
-  hist <- readStats fileName
+  (needScan, hist) <- readStats fileName
+  
   let sf = StoreFile lck fileName handle entrySize count rds scs hist (readOffset sf)
-  void $ forkIO $ scanStore sf
+  when needScan $ void $ scanStore sf
+  
   return sf
 
-readStats :: FilePath -> IO THistogram
+readStats :: FilePath -> IO (Bool, THistogram)
 readStats fp = do
-  hist <- catchIOError doRead handler >>= (atomically . thawHistogram)
+  hist <- catchIOError doRead handler >>= \(ns, x) -> do
+    h <- atomically $ thawHistogram x
+    return (ns, h)
+    
   catchIOError (renameFile fname $ fname ++ ".bak") $ const $ return ()
   return hist
   where
     fname = fp ++ "-histogram"
-    doRead = decodeFile fname
+    doRead = decodeFile fname >>= \x -> return (False, x)
     handler e = do
       logI $ "error reading histogram: " ++ show e
-      return $ mkHistogram 256
+      return $ (True, mkHistogram 256)
   
 shutdownStore :: StoreFile f -> IO ()
 shutdownStore sf = do
