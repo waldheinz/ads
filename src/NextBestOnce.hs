@@ -15,11 +15,9 @@ import Data.List ( minimumBy )
 class (Eq i, Show i) => Location i where
   toDouble :: i -> Double
   distance :: i -> i -> Double -- ^ distance between two locations in [0..1)
-  distance l1 l2
-    | d1 > d2 = d1 - d2
-    | otherwise = d2 - d1
-    where
-      (d1, d2) = (toDouble l1, toDouble l2)
+  distance l1 l2 = min d (1 - d) where
+    d = if d1 > d2 then d1 - d2 else d2 - d1
+    (d1, d2) = (toDouble l1, toDouble l2)
 
 data RoutingInfo l = RI
                      { _riMarked :: [l]
