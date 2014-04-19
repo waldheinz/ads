@@ -70,7 +70,7 @@ main = withSocketsDo $ do
       return n
 
   -- start HTTP Server
-  void $ forkIO $ Warp.run 8080 (restApi node)
+  void $ forkIO $ Warp.run 8082 (restApi node)
 
   -- start fproxy
   fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"
