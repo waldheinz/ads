@@ -323,7 +323,7 @@ maintainConnections node connect = forever $ do
 
   void $ forkIO $ connect shouldConnect $ \cresult -> do
     case cresult of
-      Left _      -> return ()
+      Left _      -> atomically $ modifyTVar' (nodeConnecting node) (filter ((/=) shouldConnect))
       Right msgio -> runPeerNode node msgio (Just $ peerId shouldConnect)
 
 -------------------------------------------------------------------------
