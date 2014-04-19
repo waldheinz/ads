@@ -80,3 +80,5 @@ main = withSocketsDo $ do
 
   -- wait for shutdown
   atomically $ readTVar shutdown >>= check
+
+  shutdownFn fn

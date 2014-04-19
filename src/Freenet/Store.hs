@@ -2,7 +2,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet.Store (
-  StoreFile, mkStoreFile, putData, getData,
+  StoreFile, mkStoreFile, shutdownStore,
+  putData, getData,
   
   -- * things that go to the store
   StorePersistable(..)
@@ -18,7 +19,9 @@ import Data.Binary.Get ( runGetOrFail )
 import Data.Binary.Put ( runPut )
 import qualified Data.ByteString.Lazy as BSL
 import Data.Hashable
+import System.Directory ( renameFile )
 import System.IO
+import System.IO.Error ( catchIOError )
 import System.Log.Logger
 
 import Freenet.Types
@@ -31,13 +34,14 @@ import Types
 
 data StoreFile f = StoreFile
                      { sfLock        :: ! Lock.Lock -- ^ for accessing the handle
+                     , sfFileName    :: ! FilePath
                      , sfHandle      :: ! Handle
                      , sfEntrySize   :: ! Int
                      , sfEntryCount  :: ! Int
-                     , sfReads       ::   TVar Word64 -- ^ total number of reads
-                     , sfReadSuccess ::   TVar Word64 -- ^ number of successful reads
-                     , sfHistogram   :: Histogram
-                     , sfReadOffset  :: Integer -> IO (Maybe f)
+                     , sfReads       :: ! (TVar Word64) -- ^ total number of reads
+                     , sfReadSuccess :: ! (TVar Word64) -- ^ number of successful reads
+                     , sfHistogram   :: ! THistogram
+                     , sfReadOffset  :: ! (Integer -> IO (Maybe f))
                      }
 
 instance ToStateJSON (StoreFile f) where
@@ -56,7 +60,7 @@ instance ToStateJSON (StoreFile f) where
 
 logI :: String -> IO ()
 logI m = infoM "freenet.store" m
-  
+
 mkStoreFile :: StorePersistable f => f -> FilePath -> Int -> IO (StoreFile f)
 mkStoreFile sp fileName count = do
   
@@ -70,11 +74,31 @@ mkStoreFile sp fileName count = do
   rds  <- newTVarIO 0
   scs  <- newTVarIO 0
   lck  <- Lock.new
-  hist <- atomically $ mkHistogram 256
-  let sf = StoreFile lck handle entrySize count rds scs hist (readOffset sf)
+  hist <- readStats fileName
+  let sf = StoreFile lck fileName handle entrySize count rds scs hist (readOffset sf)
   void $ forkIO $ scanStore sf
   return sf
 
+readStats :: FilePath -> IO THistogram
+readStats fp = do
+  hist <- catchIOError doRead handler >>= (atomically . thawHistogram)
+  catchIOError (renameFile fname $ fname ++ ".bak") $ const $ return ()
+  return hist
+  where
+    fname = fp ++ "-histogram"
+    doRead = decodeFile fname
+    handler e = do
+      logI $ "error reading histogram: " ++ show e
+      return $ mkHistogram 256
+  
+shutdownStore :: StoreFile f -> IO ()
+shutdownStore sf = do
+  logI $ "shutting down store"
+
+  hClose $ sfHandle sf
+  hist <- atomically $ freezeHistogram (sfHistogram sf)
+  encodeFile (sfFileName sf ++ "-histogram") hist
+  
 scanStore :: (DataBlock f) => StoreFile f -> IO ()
 scanStore sf = do mapM_ checkOffset offsets
   where

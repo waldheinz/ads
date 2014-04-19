@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet (
-  Freenet, initFn,
+  Freenet, initFn, shutdownFn,
   fnChkStore, fnSskStore,
   getChk, getSsk,
   offerChk, offerSsk
@@ -55,6 +55,11 @@ initFn cfg = do
       comp <- FC.initCompanion ccfg (offerChk fn) (offerSsk fn)
       return $ fn { fnCompanion = Just comp }
 
+shutdownFn :: Freenet a -> IO ()
+shutdownFn fn = do
+  FS.shutdownStore $ fnChkStore fn
+  FS.shutdownStore $ fnSskStore fn
+  
 offerSsk :: Freenet a -> SskBlock -> IO ()
 offerSsk fn df = do
   FS.putData (fnSskStore fn) df
