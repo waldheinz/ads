@@ -10,6 +10,7 @@ import Control.Concurrent.STM
 import Data.Aeson
 import Network.HTTP.Types ( status200 )
 import qualified Network.Wai as WAI
+import Network.Wai.Application.Static
 import Network.Wai.UrlMap
 
 import Freenet
@@ -26,6 +27,10 @@ restApi node = mapUrls $
     <|> mount "ssk" (stateJsonResponse $ fnSskStore $ nodeFreenet node)
      )
   ) 
+ <|> mountRoot webUi
+
+webUi :: WAI.Application
+webUi = staticApp $ defaultFileServerSettings "./webUi"
   
 connStatus :: ToJSON a => Node a -> WAI.Application
 connStatus n = stateJsonResponse $ nodePeers n
