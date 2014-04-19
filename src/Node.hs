@@ -395,7 +395,7 @@ runPeerNode node (src, sink) expected = do
       to <- registerDelay $ 30 * 1000 * 1000
       closed <- atomically $
                 (isClosedTBMQueue outq >>= \c -> if c then return True else retry) `orElse`
-                (isEmptyTBMQueue outq  >>= \e -> if e then retry else return False) `orElse`
+                (isFullTBMQueue outq  >>= \f -> if f then return False else retry) `orElse`
                 (readTVar to >>= \t -> if t then writeTBMQueue outq (Direct Ping) >> return False else retry)
                 
       unless closed sendPings
