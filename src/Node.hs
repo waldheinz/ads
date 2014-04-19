@@ -158,10 +158,6 @@ data ActiveMessage a = ActiveMessage
                        , amPreds   :: [PeerNode a]  -- ^ predecessors (where the message came from)
                        }
 
--- |
--- Turn a Freenet @Key@ into a @NodeId@ by repacking the 32 bytes.
-keyToTarget :: FN.Key -> NodeId
-keyToTarget key = mkNodeId' $ FN.unKey key
 
 mkRoutedMessage :: Node a -> NodeId -> MessagePayload a -> IO (RoutedMessage a)
 mkRoutedMessage node target msg = atomically $ do
@@ -493,7 +489,7 @@ requestNodeData n (FN.CHK loc key extra _) =
         Right blk -> decrypt blk
         Left _    -> do
           d <- request (nodeChkRequests n) req $ \r -> do
-            msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetChkRequest r)
+            msg <- mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetChkRequest r)
             sendRoutedMessage n msg Nothing
           
           result <- atomically $ waitDelayed d
@@ -513,7 +509,7 @@ requestNodeData n (FN.SSK pkh key extra dn _) = do
     Right blk -> return $ decrypt blk -- (BSL.take (fromIntegral bl) $ BSL.fromStrict blk)
     Left _    -> do
       d <- request (nodeSskRequests n) req $ \r -> do
-        msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest r)
+        msg <- mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetSskRequest r)
         sendRoutedMessage n msg Nothing
           
       result <- atomically $ waitDelayed d
@@ -534,7 +530,7 @@ requestNodeData n (FN.USK pkh key extra dn dr _) = do
     Right blk -> return $ decrypt blk
     Left _    -> do
       d <- request (nodeSskRequests n) req $ \r -> do
-        msg <- mkRoutedMessage n (keyToTarget $ FN.dataRequestLocation req) (FreenetSskRequest r)
+        msg <- mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetSskRequest r)
         sendRoutedMessage n msg Nothing
           
       result <- atomically $ waitDelayed d

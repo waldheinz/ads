@@ -25,6 +25,7 @@ executable ads
   build-depends:
     base                 >=4.6 && <4.7,
     aeson                >= 0.7,
+    array                >= 0.4,
     async                >= 2.0,
     base16-bytestring    >= 0.1,
     base64-bytestring    >= 1.0,
@@ -53,7 +54,6 @@ executable ads
     stm                  >= 2.4,
     stm-chans            >= 3.0,
     stm-conduit          >= 2.2,
---    tar                  >= 0.4,
     text                 >= 0.11,
     time                 >= 1.1,
     transformers         >= 0.3,
