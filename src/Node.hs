@@ -393,11 +393,19 @@ runPeerNode node (src, sink) expected = do
     -- inject a ping every 30s to prevent timeout on the other side
     sendPings = do
       to <- registerDelay $ 30 * 1000 * 1000
-      closed <- atomically $
-                (isClosedTBMQueue outq >>= \c -> if c then return True else retry) `orElse`
-                (isFullTBMQueue outq  >>= \f -> if f then return False else retry) `orElse`
-                (readTVar to >>= \t -> if t then writeTBMQueue outq (Direct Ping) >> return False else retry)
-                
+      closed <- atomically $ readTVar to >>= \t -> if not t then retry else do
+        c <- isClosedTBMQueue outq
+        if c
+          then return True
+          else do
+            f <- isFullTBMQueue outq
+            unless f $ writeTBMQueue outq (Direct Ping)
+            return False
+{-          
+        (isClosedTBMQueue outq >>= \c -> if c then return True else retry) `orElse`
+        (isFullTBMQueue outq  >>= \f -> if f then return False else retry) `orElse`
+        (writeTBMQueue outq (Direct Ping)
+  -}              
       unless closed sendPings
     
     handshake ni = atomically $ do
