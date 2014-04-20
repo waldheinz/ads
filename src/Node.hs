@@ -205,11 +205,15 @@ messagePushPred node mid pn = modifyTVar' (nodeActMsgs node) $ Map.update prepen
 messagePopPred :: Node a -> MessageId -> STM (Maybe (PeerNode a))
 messagePopPred node mid = do
   let
-    update _ (ActiveMessage _    []     _) = Nothing -- should not happen
-    update _ (ActiveMessage _    (_:[]) _) = Nothing -- because of this
-    update _ (ActiveMessage sent (_:xs) h) = Just $ ActiveMessage sent xs h
+--    update _ (ActiveMessage _    []     _) = Nothing -- should not happen
+--    update _ (ActiveMessage _    (_:[]) _) = Nothing -- because of this
+--    update _ (ActiveMessage sent (_:xs) h) = Just $ ActiveMessage sent xs h
 
-  (tgt, m') <- Map.updateLookupWithKey update mid <$> readTVar (nodeActMsgs node)
+    pop _ am = case amPreds am of
+      (_:xs) -> Just $ am { amPreds = xs }
+      _      -> Just am
+  
+  (tgt, m') <- Map.updateLookupWithKey pop mid <$> readTVar (nodeActMsgs node)
   writeTVar (nodeActMsgs node) m'
   
   case tgt of
