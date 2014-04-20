@@ -124,16 +124,16 @@ handlePeerMessages node pn msg = do
       Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
         local <- FN.getChk fn req
         case local of
-          Left _    -> sendRoutedMessage node rm (Just pn) (forwardResponse node mid)  -- pass on
+          Left _    -> sendRoutedMessage node rm (Just pn) Nothing -- (forwardResponse node mid)  -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
 
       Routed False rm@(RoutedMessage (FreenetSskRequest req) mid _) -> do
         local <- FN.getSsk fn req
         case local of
-          Left _    -> sendRoutedMessage node rm (Just pn) (forwardResponse node mid) -- pass on
+          Left _    -> sendRoutedMessage node rm (Just pn) Nothing -- (forwardResponse node mid) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
           
-      Routed True rm    -> sendRoutedMessage node rm Nothing (const $ return "backtrack") -- backtrack
+      Routed True rm    -> sendRoutedMessage node rm Nothing Nothing -- (const $ return "backtrack") -- backtrack
       Response mid msg' -> handleResponse node mid msg'  --forwardResponse node mid msg'
 
       _ -> return ()
@@ -176,24 +176,35 @@ data ActiveMessage a = ActiveMessage
 mkRoutedMessage :: PeerAddress a => Node a -> NodeId -> MessagePayload a -> ResponseHandler a -> IO ()
 mkRoutedMessage node target msg onResponse = do
   mid <- atomically $ nextMessageId $ nodeMidGen node
-  sendRoutedMessage node (RoutedMessage msg mid $ NBO.mkRoutingInfo target) Nothing onResponse
+  sendRoutedMessage node (RoutedMessage msg mid $ NBO.mkRoutingInfo target) Nothing (Just onResponse)
 
-sendRoutedMessage :: PeerAddress a => Node a -> RoutedMessage a -> Maybe (PeerNode a) -> ResponseHandler a -> IO ()
-sendRoutedMessage node msg prev onResp = do
+sendRoutedMessage :: PeerAddress a => Node a -> RoutedMessage a -> Maybe (PeerNode a) -> Maybe (ResponseHandler a) -> IO ()
+sendRoutedMessage node msg prev mOnResp = do
   now <- getTime
   
   logMsg <- atomically $ do
     -- create an ActiveMessage or update the message's timestamp
     let
-      go Nothing   = Just $ ActiveMessage now [] onResp
-      go (Just am) = Just $ am { amStarted = now, amResponse = onResp }
+      rh = case mOnResp of
+        Nothing -> forwardResponse node (rmId msg)
+        Just x  -> x
+        
+      go Nothing   = Just $ ActiveMessage now [] rh
+      go (Just am) = Just $ am { amStarted = now {- , amResponse = rh-} }
      in modifyTVar' (nodeActMsgs node) $ Map.alter go (rmId msg)
 
     -- let the routing run
     NBO.route (nodeNbo node) prev msg >>= \nextStep -> case nextStep of
       NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
       NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
-      NBO.Fail                -> return $ "failed: " ++ show msg
+      NBO.Fail                -> do
+        lm <- readTVar (nodeActMsgs node) >>= \m -> case Map.lookup (rmId msg) m of
+          Nothing -> return "interesting problem"
+          Just am -> amResponse am $ Failed (Just "routing failed")
+          
+        modifyTVar' (nodeActMsgs node) $ Map.delete (rmId msg) -- drop the AM
+        return lm
+        --return $ "failed: " ++ show msg
   
   logI $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
   
@@ -511,7 +522,7 @@ requestNodeData n (FN.CHK loc key extra _) =
         Left _    -> do
           d <- request (nodeChkRequests n) req $ \r -> do
             mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetChkRequest r)
-              (const $ return $ "chk reply " ++ show req)
+              (\repl -> return $ "chk reply " ++ show repl)
           
           result <- atomically $ waitDelayed d
           
@@ -554,7 +565,7 @@ requestNodeData n (FN.USK pkh key extra dn dr _) = do
         mkRoutedMessage n
           (keyToNodeId $ FN.dataRequestLocation req)
           (FreenetSskRequest r)
-          (const $ return $ "usk reply" ++ show req)
+          (\repl -> return $ "usk reply" ++ show repl)
           
       result <- atomically $ waitDelayed d
           

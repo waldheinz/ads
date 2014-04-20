@@ -77,34 +77,36 @@ data MessagePayload a
      | FreenetSskRequest FN.SskRequest
      | FreenetSskBlock   FN.SskBlock
      | Bye String
+     | Failed (Maybe String)            -- ^ 
      deriving ( Show )
 
 instance (Binary a) => Binary (MessagePayload a) where
-  put (Hello peer)           = putHeader 1 >> put peer
-  put Ping                   = putHeader 2
-  put GetPeerList            = putHeader 3
-  put (PeerList ps)          = putHeader 4 >> put ps
-  put (FreenetChkRequest dr) = putHeader 5 >> put dr
-  put (FreenetChkBlock blk)  = putHeader 6 >> put blk
-  put (FreenetSskRequest dr) = putHeader 7 >> put dr
-  put (FreenetSskBlock blk)  = putHeader 8 >> put blk
-  put (Bye msg)              = putHeader 9 >> put msg
+  put (Hello peer)           = putHeader  1 >> put peer
+  put Ping                   = putHeader  2
+  put GetPeerList            = putHeader  3
+  put (PeerList ps)          = putHeader  4 >> put ps
+  put (FreenetChkRequest dr) = putHeader  5 >> put dr
+  put (FreenetChkBlock blk)  = putHeader  6 >> put blk
+  put (FreenetSskRequest dr) = putHeader  7 >> put dr
+  put (FreenetSskBlock blk)  = putHeader  8 >> put blk
+  put (Bye msg)              = putHeader  9 >> put msg
+  put (Failed reason)        = putHeader 10 >> put reason
   
   get = do
     t <- getWord8
     
     case t of
-      1 -> Hello <$> get
-      2 -> return Ping
-      3 -> return GetPeerList
-      4 -> PeerList <$> get
-      5 -> FreenetChkRequest <$> get
-      6 -> FreenetChkBlock <$> get
-      7 -> FreenetSskRequest <$> get
-      8 -> FreenetSskBlock <$> get
-      9 -> Bye <$> get
-      _ -> fail $ "unknown message type " ++ show t
-
+      1  -> Hello <$> get
+      2  -> return Ping
+      3  -> return GetPeerList
+      4  -> PeerList <$> get
+      5  -> FreenetChkRequest <$> get
+      6  -> FreenetChkBlock <$> get
+      7  -> FreenetSskRequest <$> get
+      8  -> FreenetSskBlock <$> get
+      9  -> Bye <$> get
+      10 -> Failed <$> get
+      _  -> fail $ "unknown message type " ++ show t
 
 -- |
 -- a message which should be routed to another peer
