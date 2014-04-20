@@ -52,7 +52,7 @@ data Node l m n = Node
                   , neighbourLocation :: n -> l
                   , routingInfo       :: m -> RoutingInfo l
                   , updateRoutingInfo :: m -> RoutingInfo l -> m
-                  , pushPred          :: m -> n -> IO ()
+                  , pushPred          :: m -> n -> STM ()
                   , popPred           :: m -> STM (Maybe n)
                   }
 
@@ -76,13 +76,13 @@ route :: (Location l)
   => Node l m n     -- ^ current node
   -> Maybe n        -- ^ previous node, or Nothing if we're backtracking or we're the originator
   -> m              -- ^ message being routed
-  -> IO (Result l m n)
+  -> STM (Result l m n)
 route v prev msg = do
   case prev of
     Nothing -> return ()
     Just p  -> pushPred v msg p
 
-  atomically $ do
+  do
   
     let
       m = routingInfo v msg

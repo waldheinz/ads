@@ -18,6 +18,7 @@ import Freenet.Archive
 import Freenet.Metadata
 import Freenet.SplitFile
 import Freenet.URI
+import Peers
 
 logI :: String -> IO ()
 logI = infoM "freenet.fetch"
@@ -29,7 +30,7 @@ logD = debugM "freenet.fetch"
 -- Tries to fetch the specified URI, parses metadata if it's
 -- a control document, goes on fetching the referenced data,
 -- and finally returns everything
-fetchUri :: (Show a) => Node a -> URI -> IO (Either T.Text BSL.ByteString)
+fetchUri :: PeerAddress a => Node a -> URI -> IO (Either T.Text BSL.ByteString)
 fetchUri fn uri = do
   logI $ "fetching " ++ show uri
   
@@ -46,7 +47,8 @@ fetchUri fn uri = do
 
 -- | FIXME: watch out for infinite redirects
 resolvePath
-  :: Show a => Node a
+  :: PeerAddress a
+  => Node a
   -> [T.Text]                          -- ^ path elements to be resolved
   -> Metadata                    -- ^ the metadata where we try to locate the entries in
   -> Maybe Archive                     -- ^ archive to resolve AIR etc. against

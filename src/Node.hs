@@ -48,6 +48,7 @@ import Peers
 import Time
 import Types
 
+import Debug.Trace
 
 logD :: String -> IO ()
 logD = debugM "node"
@@ -102,8 +103,6 @@ mkNode self fn connect = do
     node = Node peers connecting pns self midgen msgMap nbo fn ac chkRm sskRm
 
   void $ forkIO $ maintainConnections node connect
---  void $ forkIO $ ensureConnectionsAlive node
-  
   return node
 
 handlePeerMessages :: PeerAddress a => Node a -> PeerNode a -> Message a -> IO ()
@@ -125,17 +124,17 @@ handlePeerMessages node pn msg = do
       Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
         local <- FN.getChk fn req
         case local of
-          Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
+          Left _    -> sendRoutedMessage node rm (Just pn) (forwardResponse node mid)  -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
 
       Routed False rm@(RoutedMessage (FreenetSskRequest req) mid _) -> do
         local <- FN.getSsk fn req
         case local of
-          Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
+          Left _    -> sendRoutedMessage node rm (Just pn) (forwardResponse node mid) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
           
-      Routed True rm    -> sendRoutedMessage node rm Nothing -- backtrack
-      Response mid msg' -> forwardResponse node mid msg'
+      Routed True rm    -> sendRoutedMessage node rm Nothing (const $ return "backtrack") -- backtrack
+      Response mid msg' -> handleResponse node mid msg'  --forwardResponse node mid msg'
 
       _ -> return ()
 
@@ -151,59 +150,79 @@ handlePeerMessages node pn msg = do
     
   writeStores >> route
 
+handleResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
+handleResponse node mid msg = do
+  logMsg <- atomically $ do
+    mam <- Map.lookup mid <$> readTVar (nodeActMsgs node)
+    
+    case mam of
+      Nothing -> return "no active message with this id"
+      Just am -> amResponse am msg
+        
+  logI $ "response for " ++ show mid ++ ": " ++ logMsg
+
 -----------------------------------------------------------------------------------------------
 -- Routing
 -----------------------------------------------------------------------------------------------
 
+type ResponseHandler a = MessagePayload a -> STM String -- give back a log message
+
 data ActiveMessage a = ActiveMessage
-                       { amStarted :: Timestamp     -- ^ when this message was sent off
-                       , amPreds   :: [PeerNode a]  -- ^ predecessors (where the message came from)
+                       { amStarted  :: Timestamp         -- ^ when this message was sent off
+                       , amPreds    :: [PeerNode a]      -- ^ predecessors (peers who think we're close to the target)
+                       , amResponse :: ResponseHandler a -- ^ what to do when the response arrives
                        }
 
+mkRoutedMessage :: PeerAddress a => Node a -> NodeId -> MessagePayload a -> ResponseHandler a -> IO ()
+mkRoutedMessage node target msg onResponse = do
+  mid <- atomically $ nextMessageId $ nodeMidGen node
+  sendRoutedMessage node (RoutedMessage msg mid $ NBO.mkRoutingInfo target) Nothing onResponse
 
-mkRoutedMessage :: Node a -> NodeId -> MessagePayload a -> IO (RoutedMessage a)
-mkRoutedMessage node target msg = atomically $ do
-  mid <- nextMessageId $ nodeMidGen node
-  return $ RoutedMessage msg mid $ NBO.mkRoutingInfo target
-
-sendRoutedMessage :: Show a => Node a -> RoutedMessage a -> Maybe (PeerNode a) -> IO ()
-sendRoutedMessage node msg prev = do
-  result <- NBO.route (nodeNbo node) prev msg
-    
-  case result of
-    NBO.Forward dest msg'   -> atomically $ enqMessage dest (Routed False msg')
-    NBO.Backtrack dest msg' -> atomically $ enqMessage dest (Routed True  msg')
-    NBO.Fail                -> logI $ "message failed fatally: " ++ show msg
-
-messagePushPred :: Node a -> MessageId -> PeerNode a -> IO ()
-messagePushPred node mid pn = do
+sendRoutedMessage :: PeerAddress a => Node a -> RoutedMessage a -> Maybe (PeerNode a) -> ResponseHandler a -> IO ()
+sendRoutedMessage node msg prev onResp = do
   now <- getTime
-  atomically $ modifyTVar' (nodeActMsgs node) $ Map.insertWith prepend mid $ ActiveMessage now [pn]
+  
+  logMsg <- atomically $ do
+    -- create an ActiveMessage or update the message's timestamp
+    let
+      go Nothing   = Just $ ActiveMessage now [] onResp
+      go (Just am) = Just $ am { amStarted = now, amResponse = onResp }
+     in modifyTVar' (nodeActMsgs node) $ Map.alter go (rmId msg)
+
+    -- let the routing run
+    NBO.route (nodeNbo node) prev msg >>= \nextStep -> case nextStep of
+      NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
+      NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
+      NBO.Fail                -> return $ "failed: " ++ show msg
+  
+  logI $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
+  
+messagePushPred :: Node a -> MessageId -> PeerNode a -> STM ()
+messagePushPred node mid pn = modifyTVar' (nodeActMsgs node) $ Map.update prepend mid
   where
-    prepend (ActiveMessage _ (x:_)) (ActiveMessage sent xs) = ActiveMessage sent (x:xs)
-    prepend _ _ = error "messagePushPred: error in prepend"
+    prepend am = Just $ am { amPreds = (pn : amPreds am) }
 
 messagePopPred :: Node a -> MessageId -> STM (Maybe (PeerNode a))
 messagePopPred node mid = do
   let
-    update _ (ActiveMessage _     [])    = Nothing -- should not happen because 
-    update _ (ActiveMessage _    (_:[])) = Nothing -- of this
-    update _ (ActiveMessage sent (_:xs)) = Just $ ActiveMessage sent xs
+    update _ (ActiveMessage _    []     _) = Nothing -- should not happen
+    update _ (ActiveMessage _    (_:[]) _) = Nothing -- because of this
+    update _ (ActiveMessage sent (_:xs) h) = Just $ ActiveMessage sent xs h
 
   (tgt, m') <- Map.updateLookupWithKey update mid <$> readTVar (nodeActMsgs node)
   writeTVar (nodeActMsgs node) m'
   
   case tgt of
-    Just (ActiveMessage _ (x:_)) -> return $ Just x
-    _                            -> return Nothing
+    Just (ActiveMessage _ (x:_) _) -> return $ Just x
+    _                              -> return Nothing
 
-forwardResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
+forwardResponse :: PeerAddress a => Node a -> MessageId -> MessagePayload a -> STM String
 forwardResponse node mid msg = do
-  mtgt <- atomically $ messagePopPred node mid
+  mtgt <- messagePopPred node mid
   
   case mtgt of
-    Nothing -> logW $ "could not send response, message id unknown: " ++ show mid
-    Just pn -> atomically $ enqMessage pn $ Response mid msg
+    Nothing -> return $ "could not send response, message id unknown: " ++ show mid
+    Just pn -> enqMessage pn (Response mid msg) >> (return $ "forwarded to " ++ show pn)
 
 nodeRouteStatus :: Node a -> IO Value
 nodeRouteStatus node = do
@@ -285,11 +304,7 @@ removePeerNode node pn = do
   modifyTVar' (nodePeerNodes node) $ filter (/= pn)         -- it's no longer connected
   modifyTVar' (nodeActMsgs node)   $ Map.mapMaybe dropPreds -- and we can drop messages routed for this node
   where
-    dropPreds am
-      | null xs'  = Nothing
-      | otherwise = Just am { amPreds = xs' }
-      where
-        xs' = filter (/= pn) (amPreds am)
+    dropPreds am = Just am { amPreds = filter (/= pn) (amPreds am) }
 
 maintainConnections :: PeerAddress a => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do
@@ -471,10 +486,10 @@ runPeerNode node (src, sink) expected = do
   -- let outgoing queue flush
   threadDelay $ 1000 * 1000
   
-instance (Show a) => UriFetch (Node a) where
+instance PeerAddress a => UriFetch (Node a) where
   getUriData = requestNodeData
 
-requestNodeData :: (Show a) => Node a -> FN.URI -> IO (Either T.Text (BS.ByteString, Int))
+requestNodeData :: PeerAddress a => Node a -> FN.URI -> IO (Either T.Text (BS.ByteString, Int))
 requestNodeData n (FN.CHK loc key extra _) =
   case FN.chkExtraCompression extra of
     Left  e -> return $ Left $ "can't decompress CHK: " `T.append` e
@@ -491,8 +506,8 @@ requestNodeData n (FN.CHK loc key extra _) =
         Right blk -> decrypt blk
         Left _    -> do
           d <- request (nodeChkRequests n) req $ \r -> do
-            msg <- mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetChkRequest r)
-            sendRoutedMessage n msg Nothing
+            mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetChkRequest r)
+              (const $ return $ "chk reply " ++ show req)
           
           result <- atomically $ waitDelayed d
           
@@ -511,8 +526,8 @@ requestNodeData n (FN.SSK pkh key extra dn _) = do
     Right blk -> return $ decrypt blk -- (BSL.take (fromIntegral bl) $ BSL.fromStrict blk)
     Left _    -> do
       d <- request (nodeSskRequests n) req $ \r -> do
-        msg <- mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetSskRequest r)
-        sendRoutedMessage n msg Nothing
+        mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetSskRequest r)
+          (const $ return $ "ssk reply " ++ show req)
           
       result <- atomically $ waitDelayed d
           
@@ -532,8 +547,10 @@ requestNodeData n (FN.USK pkh key extra dn dr _) = do
     Right blk -> return $ decrypt blk
     Left _    -> do
       d <- request (nodeSskRequests n) req $ \r -> do
-        msg <- mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetSskRequest r)
-        sendRoutedMessage n msg Nothing
+        mkRoutedMessage n
+          (keyToNodeId $ FN.dataRequestLocation req)
+          (FreenetSskRequest r)
+          (const $ return $ "usk reply" ++ show req)
           
       result <- atomically $ waitDelayed d
           

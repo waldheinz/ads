@@ -14,12 +14,13 @@ import qualified Network.Wai as WAI
 import Node
 import Freenet.Fetch
 import Freenet.URI
+import Peers
 
 -- | error response
 er :: T.Text -> WAI.Response
 er msg = WAI.responseLBS status500 [] (BSL.fromStrict $ encodeUtf8 msg)
 
-fproxy :: Show a => Node a -> WAI.Application
+fproxy :: PeerAddress a => Node a -> WAI.Application
 fproxy fn req = do
   let
     path = T.intercalate "/" $ WAI.pathInfo req
