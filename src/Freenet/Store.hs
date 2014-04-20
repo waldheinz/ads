@@ -40,7 +40,8 @@ data StoreFile f = StoreFile
                      , sfReads       :: ! (TVar Word64) -- ^ total number of reads
                      , sfReadSuccess :: ! (TVar Word64) -- ^ number of successful reads
                      , sfHistogram   :: ! THistogram
-                     , sfReadOffset  :: ! (Integer -> IO (Maybe f))
+                     , sfReadOffset  :: ! (Integer -> IO (Maybe f)) -- ^ try to read data from the given offset
+                     , sfWriteOffset :: ! (Integer -> f -> IO ())   -- ^ actually write data to the given offset
                      }
 
 instance ToStateJSON (StoreFile f) where
@@ -75,7 +76,7 @@ mkStoreFile sp fileName count = do
   lck  <- Lock.new
   (needScan, hist) <- readStats fileName
   
-  let sf = StoreFile lck fileName handle entrySize count rds scs hist (readOffset sf)
+  let sf = StoreFile lck fileName handle entrySize count rds scs hist (readOffset sf) (writeOffset sf)
   when needScan $ void $ scanStore sf
   
   return sf
@@ -124,38 +125,31 @@ locOffsets sf loc = map (\i -> (fromIntegral i `rem` (fromIntegral count)) * (fr
     count = sfEntryCount sf
     entrySize = sfEntrySize sf
 
-putData :: StorePersistable f => StoreFile f -> f -> IO ()
-putData sf df = void $ putData' sf df
-
-putData' :: StorePersistable f => StoreFile f -> f -> IO (Maybe f)
-putData' sf df = Lock.with (sfLock sf) $ doWrite where
-  handle = sfHandle sf
-  doPut  = putWord8 1 >> storePut df
-  loc = dataBlockLocation df
-
-  doGet = do
-    flags <- getWord8
-    if flags == 1
-      then storeGet
-      else fail "empty slot"
-
-  writeAt o = do
-    hSeek handle AbsoluteSeek o
-    BSL.hPut handle $ runPut doPut
-    logI $ (show loc) ++ " written at " ++ show o
-    atomically $ histInc (sfHistogram sf) $ nodeIdToDouble $ keyToNodeId loc
+-- | Actually write data to the given offset and update stats.
+writeOffset :: StorePersistable f => StoreFile f -> Integer -> f -> IO ()
+writeOffset sf o df = do
+  hSeek handle AbsoluteSeek o
+  BSL.hPut handle $ runPut doPut
+  logI $ (show loc) ++ " written at " ++ show o
+  atomically $ histInc (sfHistogram sf) $ nodeIdToDouble $ keyToNodeId loc
+  where
+    handle = sfHandle sf
+    loc = dataBlockLocation df
+    doPut = putWord8 1 >> storePut df
     
+putData :: StorePersistable f => StoreFile f -> f -> IO ()
+putData sf df = Lock.with (sfLock sf) $ doWrite where
+  loc = dataBlockLocation df
+  
   doWrite = go $ locOffsets sf loc where
-      go []     = {- logI "no free slots in store" >> -} return Nothing
+      go []     = {- logI "no free slots in store" >> -} return ()
       go (o:os) = do
-        hSeek handle AbsoluteSeek o
-        d <- BSL.hGet handle $ sfEntrySize sf
-       
-        case runGetOrFail doGet d of
-          Left  (_, _, _)   -> writeAt o >> return Nothing
-          Right (_, _, df') -> if loc == dataBlockLocation df'
-                               then return $ Just df'
-                               else go os
+        old <- sfReadOffset sf o
+        case old of
+          Nothing  -> sfWriteOffset sf o df
+          Just df' -> if loc == dataBlockLocation df'
+                      then return ()
+                      else go os
 
 readOffset :: StorePersistable f => StoreFile f -> Integer -> IO (Maybe f)
 readOffset sf offset = do
