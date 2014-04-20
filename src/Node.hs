@@ -122,7 +122,8 @@ handlePeerMessages node pn msg = do
   let
     fn = nodeFreenet node
     
-    route = void $ forkIO $ case msg of
+    route = void $ forkIO $ do
+     case msg of
       Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
         local <- FN.getChk fn req
         case local of
@@ -139,7 +140,10 @@ handlePeerMessages node pn msg = do
       Response mid msg' -> handleResponse node mid msg'  --forwardResponse node mid msg'
 
       _ -> return ()
-
+      
+     rs <- nodeRouteStatus node
+     logI $ "routing state after message handling: " ++ (show $ toJSON rs)
+  
     writeStores = case msg of
       Response _ (FreenetChkBlock blk) -> do
         atomically $ offer blk (nodeChkRequests node)
@@ -151,7 +155,8 @@ handlePeerMessages node pn msg = do
       _   -> return ()
     
   writeStores >> route
-
+  
+  
 handleResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
 handleResponse node mid msg = do
   logMsg <- atomically $ do
