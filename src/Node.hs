@@ -117,6 +117,8 @@ handlePeerMessages node _  (Direct (PeerList ps)) = do
   atomically $ mapM_ (mergeNodeInfo node) ps
   
 handlePeerMessages node pn msg = do
+  logI $ "handling " ++ show msg
+  
   let
     fn = nodeFreenet node
     
