@@ -1,7 +1,7 @@
 
 module Statistics (
   -- * Transactional Histograms
-  THistogram, mkTHistogram, histInc,
+  THistogram, mkTHistogram, histInc, histDec,
 
   -- * Histograms
   Histogram, mkHistogram,
@@ -36,17 +36,22 @@ mkTHistogram bins = THistogram <$> newArray (0, bins - 1) 0
 -- |
 -- Increment the histogram by 1 at the given location.
 histInc :: THistogram -> Double -> STM ()
-histInc h l = do
+histInc = histMod (\x -> x + 1)
+
+histDec :: THistogram -> Double -> STM ()
+histDec = histMod (\x -> x - 1)
+
+histMod :: (Word64 -> Word64) -> THistogram -> Double -> STM ()
+histMod f h l = do
   (minBin, maxBin) <- getBounds a
   
   let
     idx = max minBin $ min maxBin $ minBin + (floor $ l * (fromIntegral maxBin + 1))
-  
-  v <- readArray a idx
-  writeArray a idx (v + 1)
+    
+  readArray a idx >>= \v -> writeArray a idx $! f v -- this should be strict
   where
     a = histVals h
-    
+
 ----------------------------------------------------------------------------------------
 -- Histograms
 ----------------------------------------------------------------------------------------

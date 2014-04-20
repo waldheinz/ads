@@ -11,7 +11,7 @@ module Freenet.Store (
 
 import qualified Control.Concurrent.Lock as Lock
 import Control.Concurrent.STM
-import Control.Monad ( void, when )
+import Control.Monad ( unless, void, when )
 import Data.Aeson
 import Data.Binary
 import Data.Binary.Get ( runGetOrFail )
@@ -22,6 +22,7 @@ import System.Directory ( renameFile )
 import System.IO
 import System.IO.Error ( catchIOError )
 import System.Log.Logger
+import System.Random ( randomRIO )
 
 import Freenet.Types
 import Statistics
@@ -138,18 +139,22 @@ writeOffset sf o df = do
     doPut = putWord8 1 >> storePut df
     
 putData :: StorePersistable f => StoreFile f -> f -> IO ()
-putData sf df = Lock.with (sfLock sf) $ doWrite where
+putData sf df = Lock.with (sfLock sf) $ go [] (locOffsets sf loc) where
   loc = dataBlockLocation df
-  
-  doWrite = go $ locOffsets sf loc where
-      go []     = {- logI "no free slots in store" >> -} return ()
-      go (o:os) = do
-        old <- sfReadOffset sf o
-        case old of
-          Nothing  -> sfWriteOffset sf o df
-          Just df' -> if loc == dataBlockLocation df'
-                      then return ()
-                      else go os
+  -- there are no free slots, we must decide if and which we want to overwrite
+  go olds [] = do
+    p <- randomRIO (0, 1) :: IO Double
+    unless (p > 0.1) $ do -- TODO: use something clever instead of 0.1, maybe try to match the incoming req. distribution?
+      -- we want to overwrite
+      (o, loc') <- randomRIO (0, length olds - 1) >>= return . (olds !!)
+      atomically $ histDec (sfHistogram sf) $ nodeIdToDouble $ keyToNodeId loc'
+      writeOffset sf o df
+    
+  -- we still have some candidate slots which are possibly empty, check them
+  go olds (o:os) = sfReadOffset sf o >>= \old -> case old of
+    Nothing  -> sfWriteOffset sf o df            -- place data in previously empty slot
+    Just df' -> let loc' = dataBlockLocation df' -- we're done if the data is already there
+                in unless (loc == loc') $ go ((o, loc'):olds) os
 
 readOffset :: StorePersistable f => StoreFile f -> Integer -> IO (Maybe f)
 readOffset sf offset = do
