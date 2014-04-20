@@ -188,28 +188,30 @@ sendRoutedMessage node msg prev mOnResp = do
       rh = case mOnResp of
         Nothing -> forwardResponse node (rmId msg)
         Just x  -> x
-        
+
+    let
       go Nothing   = Just $ ActiveMessage now [] rh
       go (Just am) = Just $ am { amStarted = now {- , amResponse = rh-} }
-     in modifyTVar' (nodeActMsgs node) $ Map.alter go (rmId msg)
-
+      in modifyTVar' (nodeActMsgs node) $ Map.alter go (rmId msg)
+  
     -- let the routing run
-    NBO.route (nodeNbo node) prev msg >>= \nextStep -> case nextStep of
+    NBO.route (nodeNbo node) prev msg >>= \nextStep -> traceShow ("nextStep", nextStep) $ case nextStep of
       NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
       NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
       NBO.Fail                -> do
         case prev of
           Nothing -> return ()
           Just p  -> enqMessage p $ Response (rmId msg) (Failed (Just "routing failed"))
-          
+{-          
         lm <- readTVar (nodeActMsgs node) >>= \m -> case Map.lookup (rmId msg) m of
           Nothing -> return "interesting problem"
           Just am -> do
---            mapM_ (\p -> enqMessage p $ Response (rmId msg) (Failed (Just "routing failed"))) (amPreds am)
             amResponse am $ Failed (Just "routing failed")
+-}
           
-        modifyTVar' (nodeActMsgs node) $ Map.delete (rmId msg) -- drop the AM
-        return lm
+--        modifyTVar' (nodeActMsgs node) $ Map.delete (rmId msg) -- drop the AM
+        rh $ Failed (Just "routing failed")
+--        return lm
         --return $ "failed: " ++ show msg
   
   logI $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
