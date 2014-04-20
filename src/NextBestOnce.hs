@@ -83,7 +83,6 @@ route v prev msg = do
     Just p  -> pushPred v msg p
 
   do
-  
     let
       m = routingInfo v msg
       mm = updateRoutingInfo v msg $ mark m $ location v

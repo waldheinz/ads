@@ -198,9 +198,15 @@ sendRoutedMessage node msg prev mOnResp = do
       NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
       NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
       NBO.Fail                -> do
+        case prev of
+          Nothing -> return ()
+          Just p  -> enqMessage p $ Response (rmId msg) (Failed (Just "routing failed"))
+          
         lm <- readTVar (nodeActMsgs node) >>= \m -> case Map.lookup (rmId msg) m of
           Nothing -> return "interesting problem"
-          Just am -> amResponse am $ Failed (Just "routing failed")
+          Just am -> do
+--            mapM_ (\p -> enqMessage p $ Response (rmId msg) (Failed (Just "routing failed"))) (amPreds am)
+            amResponse am $ Failed (Just "routing failed")
           
         modifyTVar' (nodeActMsgs node) $ Map.delete (rmId msg) -- drop the AM
         return lm
@@ -242,12 +248,13 @@ forwardResponse node mid msg = do
 nodeRouteStatus :: Node a -> IO Value
 nodeRouteStatus node = do
   now <- getTime
-
+  
   let
     toState xs mid am = x : xs where
       x = object
           [ "messageId" .= mid
           , "age"       .= timeDiff (amStarted am) now
+          , "preds"     .= map (peerId . pnPeer) (amPreds am)
           ]
   
   msgs <- Map.foldlWithKey' toState [] <$> atomically (readTVar $ nodeActMsgs node)
