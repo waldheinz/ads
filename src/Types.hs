@@ -74,7 +74,7 @@ nodeIdToDouble :: NodeId -> Double
 nodeIdToDouble nid = fromRational $ (nodeIdToInteger nid) % maxNodeId
 
 instance NBO.Location NodeId where
-  toDouble = nodeIdToDouble
+  toDouble l = nodeIdToDouble l
 
 mkNodeId' :: BS.ByteString -> NodeId
 mkNodeId' bs

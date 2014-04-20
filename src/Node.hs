@@ -48,6 +48,7 @@ import Peers
 import Time
 import Types
 
+
 logD :: String -> IO ()
 logD = debugM "node"
 
@@ -56,6 +57,7 @@ logI = infoM "node"
 
 logW :: String -> IO ()
 logW = warningM "node"
+
 
 -------------------------------------------------------------------------
 -- Node
@@ -479,7 +481,7 @@ requestNodeData n (FN.CHK loc key extra _) =
     Right c -> do
       let
         req = FN.ChkRequest loc (FN.chkExtraCrypto extra)
-        decrypt blk = case FN.decryptDataBlock blk key $ FN.chkExtraCrypto extra of
+        decrypt blk = case FN.decryptDataBlock blk key of
           Left e        -> return $ Left $ "decrypting CHK data block failed: " `T.append` e
           Right (p, pl) -> FN.decompressChk c p pl
  
@@ -501,7 +503,7 @@ requestNodeData n (FN.CHK loc key extra _) =
 requestNodeData n (FN.SSK pkh key extra dn _) = do
   let
     req = FN.SskRequest pkh (FN.sskEncryptDocname key dn) (FN.sskExtraCrypto extra)
-    decrypt blk = FN.decryptDataBlock blk key $ FN.sskExtraCrypto extra
+    decrypt blk = FN.decryptDataBlock blk key
         
   fromStore <- FN.getSsk (nodeFreenet n) req
 
@@ -522,7 +524,7 @@ requestNodeData n (FN.USK pkh key extra dn dr _) = do
   let
     dn' = dn `T.append` "-" `T.append` T.pack (show dr)
     req = FN.SskRequest pkh (FN.sskEncryptDocname key dn') (FN.sskExtraCrypto extra)
-    decrypt blk = FN.decryptDataBlock blk key $ FN.sskExtraCrypto extra
+    decrypt blk = FN.decryptDataBlock blk key
         
   fromStore <- FN.getSsk (nodeFreenet n) req
 

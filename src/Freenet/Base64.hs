@@ -1,10 +1,12 @@
 
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Freenet's modified Base64 encoding
 module Freenet.Base64 (
   FreenetBase64(..),
 
   -- * Integer utilities
-  i2bs, bs2i, bsToPosI
+  i2bs, bs2i, bsToPosI, posIToBs
 ) where
 
 import Data.Bits ( shiftL, shiftR )
@@ -60,6 +62,14 @@ instance FreenetBase64 B.ByteString where
   fromBase64' = fromBase64Bs
   toBase64'   = toBase64Bs
 
+instance FreenetBase64 Word8 where
+  toBase64'     = toBase64Bs . B.singleton
+  fromBase64' t = case fromBase64Bs t of
+    Left e   -> Left e
+    Right bs -> if B.length bs == 1
+                then Right $ B.index bs 0
+                else Left "expected 1 byte"
+  
 ------------------------------------------------------------------------
 -- base64 encoded integers
 ------------------------------------------------------------------------
@@ -76,6 +86,12 @@ bs2i b
 
 bsToPosI :: B.ByteString -> Integer
 bsToPosI = B.foldl' (\i bb -> (i `shiftL` 8) + fromIntegral bb) 0 
+
+posIToBs :: Integer -> B.ByteString
+posIToBs x = B.reverse $ B.unfoldr go x where
+  go i = if i == 0
+         then Nothing
+         else Just (fromIntegral i, i `shiftR` 8)
 
 i2bs :: Integer -> B.ByteString
 i2bs x

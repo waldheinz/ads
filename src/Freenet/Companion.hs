@@ -47,14 +47,16 @@ initCompanion cfg chkHandler sskHandler = do
       "chk" -> do
         let
           (ktxt, rest) = breakSpace args
-          (_, rest') = breakSpace rest
+          (cstr, rest') = breakSpace rest
           (hstr, rest'') = breakSpace rest'
           (dstr, _) = breakSpace rest''
           df = do
-            key <- fromBase64' ktxt >>= mkKey
-            hdr <- fromBase64' hstr >>= mkChkHeader
-            d <- fromBase64' dstr
-            mkChkBlock key hdr d
+            key  <- fromBase64' ktxt >>= mkKey
+            calg <- fromBase64' cstr
+            hdr  <- fromBase64' hstr >>= mkChkHeader
+            d    <- fromBase64' dstr
+            
+            mkChkBlock key hdr d calg
 
         case df of
           Left e  -> putStrLn $ "could not parse CHK found response: " ++ T.unpack e

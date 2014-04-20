@@ -16,6 +16,7 @@ import Crypto.Cipher.AES
 import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put ( putByteString )
+import Data.Bits ( (.&.), shiftL )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import Data.Digest.Pure.SHA
@@ -77,10 +78,15 @@ chkHeaderCipherLen = BS.drop 34 . unChkHeader
 chkHeaderHashId :: ChkHeader -> Word16
 chkHeaderHashId = runGet get . BSL.fromStrict . unChkHeader
 
-data ChkBlock = ChkBlock !Key !ChkHeader !BS.ByteString -- location, headers and data
+data ChkBlock = ChkBlock
+                { chkBlockKey    :: ! Key           -- ^ location
+                , chkBlockCrypto :: ! Word8         -- ^ crypto algorithm, 2 -> AES_PCFB_256_SHA256, 3 -> AES_CTR_256_SHA256
+                , chkBlockHeader :: ! ChkHeader     -- ^ headers
+                , chkBlockData   :: ! BS.ByteString -- ^ data
+                }
 
 instance Show ChkBlock where
-  show (ChkBlock k h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
+  show (ChkBlock k _ h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
 
 -- |
 -- Size of the CHK payload, which is 32kiB.
@@ -88,26 +94,27 @@ chkDataSize :: Int
 chkDataSize = 32768
 
 instance StorePersistable ChkBlock where
-  storeSize = \_ -> 32 + chkHeaderSize + chkDataSize
-  storePut  = \(ChkBlock k h d) -> put k >> put h >> putByteString d
+  storeSize = const $ 32 + chkHeaderSize + chkDataSize + 1 -- first is key and last is crypto
+  storePut  = \(ChkBlock k calg h d) -> put k >> put calg >> put h >> putByteString d
   storeGet  = do
-    (k, h, d) <- (,,) <$> get <*> get <*> getByteString chkDataSize
-    case mkChkBlock k h d of
+    (k, calg, h, d) <- (,,,) <$> get <*> get <*> get <*> getByteString chkDataSize
+    case mkChkBlock k h d calg of
       Right df -> return df
       Left e   -> fail $ T.unpack e
   
 -- | find the routing key for a DataFound
 instance DataBlock ChkBlock where
-  dataBlockLocation (ChkBlock k _ _) = k
-  decryptDataBlock = decryptChk
-
+  dataBlockLocation (ChkBlock k c _ _)   = freenetLocation k $ (1 `shiftL` 8) + (fromIntegral $ c .&. 0xff)
+  decryptDataBlock                       = decryptChk
+--  dataBlockType (ChkBlock _ crypto _ _)  = (1 `shiftL` 8) + (fromIntegral $ crypto .&. 0xff)
+  
 instance Binary ChkBlock where
   put = storePut
   get = storeGet
 
-mkChkBlock :: Key -> ChkHeader -> BS.ByteString -> Either T.Text ChkBlock
-mkChkBlock k h d
-  | hash == (BSL.fromStrict $ unKey k) = Right $ ChkBlock k h d
+mkChkBlock :: Key -> ChkHeader -> BS.ByteString -> Word8 -> Either T.Text ChkBlock
+mkChkBlock k h d calg
+  | hash == (BSL.fromStrict $ unKey k) = Right $ ChkBlock k calg h d
   | otherwise = Left "hash mismatch"
   where
     hash = bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
@@ -118,9 +125,8 @@ mkChkBlock k h d
 decryptChk
   :: ChkBlock                           -- ^ the encrypted data together with their headers
   -> Key                                -- ^ the secret crypto key (second part of URIs)
-  -> Word8                              -- ^ crypto algorithm used
   -> Either T.Text (BS.ByteString, Int) -- ^ (decrypted payload, original length)
-decryptChk (ChkBlock _ header ciphertext) key calg
+decryptChk (ChkBlock _ calg header ciphertext) key
   | calg == 3 = decryptChkAesCtr header ciphertext key
   | calg == 2 = decryptChkAesPcfb header ciphertext key
   | otherwise = Left $ T.pack $ "unknown CHK crypto algorithm " ++ show calg
@@ -171,7 +177,7 @@ instance Binary ChkRequest where
   get = ChkRequest <$> get <*> get
 
 instance DataRequest ChkRequest where
-  dataRequestLocation = chkReqLocation
+  dataRequestLocation (ChkRequest l a) = freenetLocation l $ (1 `shiftL` 8) + (fromIntegral $ a .&. 0xff)
 
 decompressChk
   :: CompressionCodec -- ^ codec to use

@@ -17,7 +17,7 @@ import Control.Applicative ( (<$>), (<*>) )
 import Control.Monad.ST ( runST )
 import Data.Binary
 import Data.Binary.Get
-import Data.Bits ( (.&.), (.|.) )
+import Data.Bits ( (.&.), (.|.), shiftL )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import Data.Digest.Pure.SHA
@@ -106,8 +106,9 @@ instance StorePersistable SskBlock where
       Left e   -> fail $ T.unpack e
   
 instance DataBlock SskBlock where
-  dataBlockLocation (SskBlock loc _ _ _) = loc -- sskLocation' (hashPubKey pk) (mkKey' $ sskHeaderEHDocname hdr)
-  decryptDataBlock = decryptSskBlock
+  dataBlockLocation (SskBlock loc _ _ _) = freenetLocation loc $ (2 `shiftL` 8) + 2
+  decryptDataBlock                       = decryptSskBlock
+--   dataBlockType                          = const $ (2 `shiftL` 8) + 2
 
 instance Binary SskBlock where
   put = storePut
@@ -131,9 +132,9 @@ mkSskBlock k h d pk
     hashHeader = BS.take 72 $ unSskHeader h
     sig = uncurry DSA.Signature $ sskHeaderRS h
 
-decryptSskBlock :: SskBlock -> Key -> Word8 -> Either T.Text (BS.ByteString, Int)
-decryptSskBlock (SskBlock _ _ h d) key calg
-  | calg /= 2 = Left $ T.pack $ "unknown SSK crypto algorithm " ++ show calg
+decryptSskBlock :: SskBlock -> Key -> Either T.Text (BS.ByteString, Int)
+decryptSskBlock (SskBlock _ _ h d) key
+--  | calg /= 2 = Left $ T.pack $ "unknown SSK crypto algorithm " ++ show calg
   | dataLength < (fromIntegral origDataLength) = Left $ "data length mismatch"
   | otherwise = Right (plaintext, fromIntegral origDataLength) -- BSL.take (fromIntegral origDataLength) plaintext
   where
@@ -269,7 +270,7 @@ instance Binary SskRequest where
   get = SskRequest <$> get <*> get <*> get
   
 instance DataRequest SskRequest where
-  dataRequestLocation (SskRequest pkh ehd _) = sskLocation' pkh ehd
+  dataRequestLocation (SskRequest pkh ehd alg) = freenetLocation (sskLocation' pkh ehd) ((2 `shiftL` 8) + (fromIntegral alg))
   
 decompressSsk :: CompressionCodec -> BSL.ByteString -> IO (Either T.Text BSL.ByteString)
 decompressSsk codec inp = decompress codec $ BSL.drop 2 inp
