@@ -152,10 +152,10 @@ putData' sf df = Lock.with (sfLock sf) $ doWrite where
         d <- BSL.hGet handle $ sfEntrySize sf
        
         case runGetOrFail doGet d of
-          Left  (_, _, e) -> logI (show e) >> writeAt o >> return Nothing
+          Left  (_, _, _)   -> writeAt o >> return Nothing
           Right (_, _, df') -> if loc == dataBlockLocation df'
-                              then logI ((show loc) ++ " already in store") >> (return $ Just df')
-                              else logI ("store has " ++ (show $ dataBlockLocation df') ) >> go os
+                               then return $ Just df'
+                               else go os
 
 readOffset :: StorePersistable f => StoreFile f -> Integer -> IO (Maybe f)
 readOffset sf offset = do
