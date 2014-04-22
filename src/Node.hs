@@ -137,7 +137,7 @@ handlePeerMessages node pn msg = do
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
           
       Routed True rm    -> sendRoutedMessage node rm Nothing Nothing -- (const $ return "backtrack") -- backtrack
-      Response mid msg' -> handleResponse node mid msg'  --forwardResponse node mid msg'
+      Response mid msg' -> (atomically $ handleResponse node mid msg') >>= \log -> logI $ "routed " ++ show mid ++ ": " ++ show log
 
       _ -> return ()
       
@@ -155,19 +155,34 @@ handlePeerMessages node pn msg = do
       _   -> return ()
     
   writeStores >> route
-  
-  
-handleResponse :: Node a -> MessageId -> MessagePayload a -> IO ()
-handleResponse node mid msg = do
-  logMsg <- atomically $ do
-    mam <- Map.lookup mid <$> readTVar (nodeActMsgs node)
-    
-    case mam of
-      Nothing -> return "no active message with this id"
-      Just am -> amResponse am msg
-        
-  logI $ "response for " ++ show mid ++ ": " ++ logMsg
 
+
+forwardResponse :: PeerAddress a => Node a -> MessageId -> MessagePayload a -> STM String
+forwardResponse node mid msg = do
+  mtgt <- messagePopPred node mid
+  
+  case mtgt of
+    Nothing -> return $ "could not send response, message id unknown: " ++ show mid
+    Just pn -> enqMessage pn (Response mid msg) >> (return $ "forwarded to " ++ show pn)
+
+handleResponse :: Show a => Node a -> MessageId -> MessagePayload a -> STM String
+handleResponse node mid msg = do
+  m <- readTVar (nodeActMsgs node)
+    
+  case Map.lookup mid m of
+    Nothing -> return "no active message with this id"
+    Just am -> do
+      -- notify local handler immediately, but only once
+      am' <- case amResponse am of
+        Nothing -> return am
+        Just h  -> h msg >> return am { amResponse = Nothing }
+
+      (m', logMsg) <- case amPreds am' of
+        []      -> return (Map.delete mid m, "no preds") -- if there are no preds, we can drop the AM
+        (pn:ps) -> enqMessage pn (Response mid msg) >> return (Map.insert mid (am' { amPreds = ps }) m, "sent to " ++ show pn)
+
+      writeTVar (nodeActMsgs node) m' >> return logMsg
+      
 -----------------------------------------------------------------------------------------------
 -- Routing
 -----------------------------------------------------------------------------------------------
@@ -175,9 +190,9 @@ handleResponse node mid msg = do
 type ResponseHandler a = MessagePayload a -> STM String -- give back a log message
 
 data ActiveMessage a = ActiveMessage
-                       { amStarted  :: Timestamp         -- ^ when this message was sent off
-                       , amPreds    :: [PeerNode a]      -- ^ predecessors (peers who think we're close to the target)
-                       , amResponse :: ResponseHandler a -- ^ what to do when the response arrives
+                       { amStarted  :: Timestamp                 -- ^ when this message was sent off
+                       , amPreds    :: [PeerNode a]              -- ^ predecessors (peers who think we're close to the target)
+                       , amResponse :: Maybe (ResponseHandler a) -- ^ what to do when the response arrives, only for locally generated messages
                        }
 
 instance Show a => Show (ActiveMessage a) where
@@ -189,18 +204,13 @@ mkRoutedMessage node target msg onResponse = do
   sendRoutedMessage node (RoutedMessage msg mid $ NBO.mkRoutingInfo target) Nothing (Just onResponse)
 
 sendRoutedMessage :: PeerAddress a => Node a -> RoutedMessage a -> Maybe (PeerNode a) -> Maybe (ResponseHandler a) -> IO ()
-sendRoutedMessage node msg prev mOnResp = do
+sendRoutedMessage node msg prev onResp = do
   now <- getTime
   
   logMsg <- atomically $ do
     -- create an ActiveMessage or update the message's timestamp
     let
-      rh = case mOnResp of
-        Nothing -> forwardResponse node (rmId msg)
-        Just x  -> x
-
-    let
-      go Nothing   = Just $ ActiveMessage now [] rh
+      go Nothing   = Just $ ActiveMessage now [] onResp
       go (Just am) = Just $ am { amStarted = now {- , amResponse = rh-} }
       in modifyTVar' (nodeActMsgs node) $ Map.alter go (rmId msg)
   
@@ -210,19 +220,10 @@ sendRoutedMessage node msg prev mOnResp = do
     traceShow tmpmap $ NBO.route (nodeNbo node) prev msg >>= \nextStep -> traceShow ("nextStep", nextStep) $ case nextStep of
       NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
       NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
-      NBO.Fail                -> do
-        lm <- readTVar (nodeActMsgs node) >>= \m -> case Map.lookup (rmId msg) m of
-          Nothing -> return "interesting problem"
-          Just am -> do
-            amResponse am $ Failed (Just "routing failed")
-          
---        modifyTVar' (nodeActMsgs node) $ Map.delete (rmId msg) -- drop the AM
---        rh $ Failed (Just "routing failed")
-        return lm
-        --return $ "failed: " ++ show msg
+      NBO.Fail                -> handleResponse node (rmId msg) (Failed $ Just "routing failed")
   
   logI $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
-  
+
 messagePushPred :: Node a -> MessageId -> PeerNode a -> STM ()
 messagePushPred node mid pn = modifyTVar' (nodeActMsgs node) $ Map.update prepend mid
   where
@@ -232,15 +233,15 @@ messagePopPred :: Node a -> MessageId -> STM (Maybe (PeerNode a))
 messagePopPred node mid = do
   let
     amMap = nodeActMsgs node
-    pop am = Just $ case amPreds am of
-      (_:xs) -> am { amPreds = xs }
-      _      -> am
   
-  m <- readTVar (nodeActMsgs node)
+  m <- readTVar amMap
   
   let
     tgt = Map.lookup mid m
     m'  = Map.update pop mid m
+    pop am = Just $ case amPreds am of
+      (_:xs) -> am { amPreds = xs }
+      _      -> am
     
   writeTVar amMap m'
   
@@ -248,13 +249,6 @@ messagePopPred node mid = do
     Just (ActiveMessage _ (x:_) _) -> return $ Just x
     _                              -> return Nothing
 
-forwardResponse :: PeerAddress a => Node a -> MessageId -> MessagePayload a -> STM String
-forwardResponse node mid msg = do
-  mtgt <- messagePopPred node mid
-  
-  case mtgt of
-    Nothing -> return $ "could not send response, message id unknown: " ++ show mid
-    Just pn -> enqMessage pn (Response mid msg) >> (return $ "forwarded to " ++ show pn)
 
 nodeRouteStatus :: Node a -> IO Value
 nodeRouteStatus node = do
