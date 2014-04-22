@@ -48,8 +48,6 @@ import Peers
 import Time
 import Types
 
-import Debug.Trace
-
 logD :: String -> IO ()
 logD = debugM "node"
 
@@ -117,13 +115,10 @@ handlePeerMessages node _  (Direct (PeerList ps)) = do
   atomically $ mapM_ (mergeNodeInfo node) ps
   
 handlePeerMessages node pn msg = do
-  logI $ "handling " ++ show msg
-  
   let
     fn = nodeFreenet node
     
-    route = void $ forkIO $ do
-     case msg of
+    route = void $ forkIO $ case msg of
       Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
         local <- FN.getChk fn req
         case local of
@@ -136,14 +131,12 @@ handlePeerMessages node pn msg = do
           Left _    -> sendRoutedMessage node rm (Just pn) Nothing -- (forwardResponse node mid) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
           
-      Routed True rm    -> sendRoutedMessage node rm Nothing Nothing -- (const $ return "backtrack") -- backtrack
-      Response mid msg' -> (atomically $ handleResponse node mid msg') >>= \log -> logI $ "routed " ++ show mid ++ ": " ++ show log
+      Routed True rm    -> sendRoutedMessage node rm Nothing Nothing -- backtrack
+      Response mid msg' -> (atomically $ handleResponse node mid msg') >>=
+                            \lm -> logD $ "routed " ++ show mid ++ ": " ++ show lm
 
       _ -> return ()
       
-     rs <- nodeRouteStatus node
-     logI $ "routing state after message handling: " ++ (show $ toJSON rs)
-  
     writeStores = case msg of
       Response _ (FreenetChkBlock blk) -> do
         atomically $ offer blk (nodeChkRequests node)
@@ -155,15 +148,6 @@ handlePeerMessages node pn msg = do
       _   -> return ()
     
   writeStores >> route
-
-
-forwardResponse :: PeerAddress a => Node a -> MessageId -> MessagePayload a -> STM String
-forwardResponse node mid msg = do
-  mtgt <- messagePopPred node mid
-  
-  case mtgt of
-    Nothing -> return $ "could not send response, message id unknown: " ++ show mid
-    Just pn -> enqMessage pn (Response mid msg) >> (return $ "forwarded to " ++ show pn)
 
 handleResponse :: Show a => Node a -> MessageId -> MessagePayload a -> STM String
 handleResponse node mid msg = do
@@ -216,14 +200,12 @@ sendRoutedMessage node msg prev onResp = do
       in modifyTVar' (nodeActMsgs node) $ Map.alter go (rmId msg)
   
     -- let the routing run
-    tmpmap <- readTVar (nodeActMsgs node)
-    
-    traceShow tmpmap $ NBO.route (nodeNbo node) prev msg >>= \nextStep -> traceShow ("nextStep", nextStep) $ case nextStep of
+    NBO.route (nodeNbo node) prev msg >>= \nextStep -> case nextStep of
       NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
       NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
       NBO.Fail                -> handleResponse node (rmId msg) (Failed $ Just "routing failed")
   
-  logI $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
+  logD $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
 
 messagePushPred :: Node a -> MessageId -> PeerNode a -> STM ()
 messagePushPred node mid pn = modifyTVar' (nodeActMsgs node) $ Map.update prepend mid
