@@ -239,9 +239,10 @@ messagePopPred node mid = do
   let
     tgt = Map.lookup mid m
     m'  = Map.update pop mid m
-    pop am = Just $ case amPreds am of
-      (_:xs) -> am { amPreds = xs }
-      _      -> am
+    
+    pop (ActiveMessage s (_:xs) h      ) = Just $ ActiveMessage s xs h -- messages with more preds just get a pred removed
+    pop (ActiveMessage _ _      Nothing) = Nothing -- remote messages without any more preds can be dropped
+    pop am                               = Just am -- a local message without preds is retained, because it may be routed somewhere else
     
   writeTVar amMap m'
   
