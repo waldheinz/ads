@@ -179,6 +179,7 @@ handleResponse node mid msg = do
 
       (m', logMsg) <- case amPreds am' of
         []      -> return (Map.delete mid m, "no preds") -- if there are no preds, we can drop the AM
+        (pn:[]) -> enqMessage pn (Response mid msg) >> return (Map.delete mid m, "sent and dropped AM")
         (pn:ps) -> enqMessage pn (Response mid msg) >> return (Map.insert mid (am' { amPreds = ps }) m, "sent to " ++ show pn)
 
       writeTVar (nodeActMsgs node) m' >> return logMsg
