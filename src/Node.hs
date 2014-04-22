@@ -180,6 +180,9 @@ data ActiveMessage a = ActiveMessage
                        , amResponse :: ResponseHandler a -- ^ what to do when the response arrives
                        }
 
+instance Show a => Show (ActiveMessage a) where
+  show (ActiveMessage s ps _) = "ActiveMessage {amStarted=" ++ show s ++ ", amPreds=" ++ show ps ++ "}"
+
 mkRoutedMessage :: PeerAddress a => Node a -> NodeId -> MessagePayload a -> ResponseHandler a -> IO ()
 mkRoutedMessage node target msg onResponse = do
   mid <- atomically $ nextMessageId $ nodeMidGen node
@@ -202,7 +205,9 @@ sendRoutedMessage node msg prev mOnResp = do
       in modifyTVar' (nodeActMsgs node) $ Map.alter go (rmId msg)
   
     -- let the routing run
-    NBO.route (nodeNbo node) prev msg >>= \nextStep -> traceShow ("nextStep", nextStep) $ case nextStep of
+    tmpmap <- readTVar (nodeActMsgs node)
+    
+    traceShow tmpmap $ NBO.route (nodeNbo node) prev msg >>= \nextStep -> traceShow ("nextStep", nextStep) $ case nextStep of
       NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
       NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
       NBO.Fail                -> do
