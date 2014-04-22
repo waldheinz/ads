@@ -211,19 +211,14 @@ sendRoutedMessage node msg prev mOnResp = do
       NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
       NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
       NBO.Fail                -> do
-        case prev of
-          Nothing -> return ()
-          Just p  -> enqMessage p $ Response (rmId msg) (Failed (Just "routing failed"))
-{-          
         lm <- readTVar (nodeActMsgs node) >>= \m -> case Map.lookup (rmId msg) m of
           Nothing -> return "interesting problem"
           Just am -> do
             amResponse am $ Failed (Just "routing failed")
--}
           
 --        modifyTVar' (nodeActMsgs node) $ Map.delete (rmId msg) -- drop the AM
-        rh $ Failed (Just "routing failed")
---        return lm
+--        rh $ Failed (Just "routing failed")
+        return lm
         --return $ "failed: " ++ show msg
   
   logI $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
@@ -236,16 +231,18 @@ messagePushPred node mid pn = modifyTVar' (nodeActMsgs node) $ Map.update prepen
 messagePopPred :: Node a -> MessageId -> STM (Maybe (PeerNode a))
 messagePopPred node mid = do
   let
---    update _ (ActiveMessage _    []     _) = Nothing -- should not happen
---    update _ (ActiveMessage _    (_:[]) _) = Nothing -- because of this
---    update _ (ActiveMessage sent (_:xs) h) = Just $ ActiveMessage sent xs h
-
-    pop _ am = case amPreds am of
-      (_:xs) -> Just $ am { amPreds = xs }
-      _      -> Just am
+    amMap = nodeActMsgs node
+    pop am = Just $ case amPreds am of
+      (_:xs) -> am { amPreds = xs }
+      _      -> am
   
-  (tgt, m') <- Map.updateLookupWithKey pop mid <$> readTVar (nodeActMsgs node)
-  writeTVar (nodeActMsgs node) m'
+  m <- readTVar (nodeActMsgs node)
+  
+  let
+    tgt = Map.lookup mid m
+    m'  = Map.update pop mid m
+    
+  writeTVar amMap m'
   
   case tgt of
     Just (ActiveMessage _ (x:_) _) -> return $ Just x
