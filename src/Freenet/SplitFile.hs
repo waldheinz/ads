@@ -9,7 +9,7 @@ module Freenet.SplitFile (
 import qualified Codec.FEC as FEC
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
-import Control.Exception ( ErrorCall, catch )
+import qualified Control.Exception as CE
 import Control.Monad ( replicateM_ )
 import Data.Word
 import qualified Data.ByteString.Lazy as BSL
@@ -109,9 +109,9 @@ fetchSplitFile fn (SplitFile comp dlen _ segs _) = do -- TODO: we're not returni
   case fetched of
     Left e   -> return $ Left e
     Right bs -> do
-      fec <- catch
+      fec <- CE.catch
              (return $ Right $ FEC.decode (FEC.fec k total) $ take k bs)
-             (\e -> return $ Left $ T.pack $ show ( e :: ErrorCall))
+             (\e -> return $ Left $ T.pack $ show ( e :: CE.ErrorCall))
              
       case fec of
         Left e -> return $ Left e
