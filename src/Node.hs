@@ -28,7 +28,7 @@ import qualified Data.Conduit as C
 import qualified Data.Conduit.TQueue as C
 import Data.List ( nub )
 import qualified Data.HashMap.Strict as HMap
-import qualified Data.Map.Strict as Map
+-- import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
 import qualified Data.Text as T
 import System.FilePath ( (</>) )
@@ -63,15 +63,15 @@ logW = warningM "node"
 -------------------------------------------------------------------------
 
 data Node a = Node
-            { nodePeers       :: TVar [Peer a]                                  -- ^ the peers we know about
-            , nodeConnecting  :: TVar [Peer a]                                  -- ^ peers we're currently connecting to
-            , nodePeerNodes   :: TVar [PeerNode a]                              -- ^ the nodes we're connected to
-            , nodeIdentity    :: NodeInfo a                                     -- ^ our identity
-            , nodeMidGen      :: MessageIdGen                                   -- ^ message id generator
-            , nodeActMsgs     :: TVar (Map.Map MessageId (ActiveMessage a))     -- ^ messages we're currently routing
-            , nodeNbo         :: NBO.Node NodeId (RoutedMessage a) (PeerNode a) -- ^ our NBO identity for routing
-            , nodeFreenet     :: FN.Freenet a                                   -- ^ our freenet compatibility layer
-            , nodeArchives    :: FN.ArchiveCache                                -- ^ Freenet LRU archive cache
+            { nodePeers       :: TVar [Peer a]                                   -- ^ the peers we know about
+            , nodeConnecting  :: TVar [Peer a]                                   -- ^ peers we're currently connecting to
+            , nodePeerNodes   :: TVar [PeerNode a]                               -- ^ the nodes we're connected to
+            , nodeIdentity    :: NodeInfo a                                      -- ^ our identity
+            , nodeMidGen      :: MessageIdGen                                    -- ^ message id generator
+            , nodeActMsgs     :: TVar (HMap.HashMap MessageId (ActiveMessage a)) -- ^ messages we're currently routing
+            , nodeNbo         :: NBO.Node NodeId (RoutedMessage a) (PeerNode a)  -- ^ our NBO identity for routing
+            , nodeFreenet     :: FN.Freenet a                                    -- ^ our freenet compatibility layer
+            , nodeArchives    :: FN.ArchiveCache                                 -- ^ Freenet LRU archive cache
             , nodeChkRequests :: RequestManager FN.ChkRequest FN.ChkBlock
             , nodeSskRequests :: RequestManager FN.SskRequest FN.SskBlock
             }
@@ -82,7 +82,7 @@ mkNode self fn connect = do
   connecting <- newTVarIO [] -- peers we're currently connecting to
   pns    <- newTVarIO []
   midgen <- mkMessageIdGen
-  msgMap <- newTVarIO Map.empty
+  msgMap <- newTVarIO HMap.empty
   ac     <- FN.mkArchiveCache 10
   chkRm  <- atomically mkRequestManager
   sskRm  <- atomically mkRequestManager
@@ -153,7 +153,7 @@ handleResponse :: Show a => Node a -> MessageId -> MessagePayload a -> STM Strin
 handleResponse node mid msg = do
   m <- readTVar (nodeActMsgs node)
     
-  case Map.lookup mid m of
+  case HMap.lookup mid m of
     Nothing -> return "no active message with this id"
     Just am -> do
       -- notify local handler immediately, but only once
@@ -162,9 +162,9 @@ handleResponse node mid msg = do
         Just h  -> h msg >> return am { amResponse = Nothing }
 
       (m', logMsg) <- case amPreds am' of
-        []      -> return (Map.delete mid m, "no preds") -- if there are no preds, we can drop the AM
-        (pn:[]) -> enqMessage pn (Response mid msg) >> return (Map.delete mid m, "sent and dropped AM")
-        (pn:ps) -> enqMessage pn (Response mid msg) >> return (Map.insert mid (am' { amPreds = ps }) m, "sent to " ++ show pn)
+        []      -> return (HMap.delete mid m, "no preds") -- if there are no preds, we can drop the AM
+        (pn:[]) -> enqMessage pn (Response mid msg) >> return (HMap.delete mid m, "sent and dropped AM")
+        (pn:ps) -> enqMessage pn (Response mid msg) >> return (HMap.insert mid (am' { amPreds = ps }) m, "sent to " ++ show pn)
 
       writeTVar (nodeActMsgs node) m' >> return logMsg
       
@@ -195,9 +195,10 @@ sendRoutedMessage node msg prev onResp = do
   logMsg <- atomically $ do
     -- create an ActiveMessage or update the message's timestamp
     let
-      go Nothing   = Just $ ActiveMessage now [] onResp
-      go (Just am) = Just $ am { amStarted = now {- , amResponse = rh-} }
-      in modifyTVar' (nodeActMsgs node) $ Map.alter go (rmId msg)
+      mid = rmId msg
+      go Nothing   = ActiveMessage now [] onResp
+      go (Just am) = am { amStarted = now }
+      in modifyTVar' (nodeActMsgs node) $ \m -> HMap.insert mid (go $ HMap.lookup mid m) m
   
     -- let the routing run
     NBO.route (nodeNbo node) prev msg >>= \nextStep -> case nextStep of
@@ -208,9 +209,9 @@ sendRoutedMessage node msg prev onResp = do
   logD $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
 
 messagePushPred :: Node a -> MessageId -> PeerNode a -> STM ()
-messagePushPred node mid pn = modifyTVar' (nodeActMsgs node) $ Map.update prepend mid
+messagePushPred node mid pn = modifyTVar' (nodeActMsgs node) $ HMap.adjust prepend mid
   where
-    prepend am = Just $ am { amPreds = (pn : amPreds am) }
+    prepend am = am { amPreds = (pn : amPreds am) }
 
 messagePopPred :: Node a -> MessageId -> STM (Maybe (PeerNode a))
 messagePopPred node mid = do
@@ -220,13 +221,12 @@ messagePopPred node mid = do
   m <- readTVar amMap
   
   let
-    tgt = Map.lookup mid m
-    m'  = Map.update pop mid m
-    
-    pop (ActiveMessage _ (_:[]) Nothing) = Nothing -- remote messages without any more preds can be dropped
-    pop (ActiveMessage s (_:xs) h      ) = Just $ ActiveMessage s xs h -- messages with more preds just get a pred removed
-    pop am                               = Just am -- a local message without preds is retained, because it may be routed somewhere else
-    
+    tgt = HMap.lookup mid m
+    m' = case tgt of
+      Just (ActiveMessage _ (_:[]) Nothing) -> HMap.delete mid m -- remote messages without any more preds can be dropped
+      Just (ActiveMessage s (_:xs) h      ) -> HMap.insert mid (ActiveMessage s xs h) m -- messages with more preds just get a pred removed
+      _                                     -> m -- a local message without preds is retained, because it may be routed somewhere else
+
   writeTVar amMap m'
   
   case tgt of
@@ -246,7 +246,7 @@ nodeRouteStatus node = do
           , "preds"     .= map (peerId . pnPeer) (amPreds am)
           ]
   
-  msgs <- Map.foldlWithKey' toState [] <$> atomically (readTVar $ nodeActMsgs node)
+  msgs <- HMap.foldlWithKey' toState [] <$> atomically (readTVar $ nodeActMsgs node)
   
   return $ object [ "messages" .= msgs ]
     
@@ -312,10 +312,10 @@ addPeerNode node pn = do
 -- was lost.
 removePeerNode :: Node a -> PeerNode a -> STM ()
 removePeerNode node pn = do
-  modifyTVar' (nodePeerNodes node) $ filter (/= pn)         -- it's no longer connected
-  modifyTVar' (nodeActMsgs node)   $ Map.mapMaybe dropPreds -- and we can drop messages routed for this node
+  modifyTVar' (nodePeerNodes node) $ filter (/= pn)     -- no longer connected
+  modifyTVar' (nodeActMsgs node)   $ HMap.map dropPreds -- and we can drop messages routed for this node
   where
-    dropPreds am = Just am { amPreds = filter (/= pn) (amPreds am) }
+    dropPreds am = am { amPreds = filter (/= pn) (amPreds am) } -- TODO: some AMs should be re-sent to other peers
 
 maintainConnections :: PeerAddress a => Node a -> ConnectFunction a -> IO ()
 maintainConnections node connect = forever $ do

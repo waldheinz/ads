@@ -38,7 +38,6 @@ executable ads
     conduit              >= 1.0,
     conduit-extra        >= 1.1,
     configurator         >= 0.2,
-    containers           >= 0.4,
     cprng-aes            >= 0.5,
     crypto-pubkey        >= 0.2,
     directory            >= 1.2,

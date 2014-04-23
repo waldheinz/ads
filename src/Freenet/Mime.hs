@@ -5,13 +5,13 @@ module Freenet.Mime (
   Mime, DefaultMimes, defaultMimes, lookupMime
   ) where
 
-import qualified Data.Map.Strict as Map
+import qualified Data.HashMap.Strict as Map
 import qualified Data.Text as T
 import Data.Word
 
 type Mime = T.Text
 
-newtype DefaultMimes = DefaultMimes { unDefMime :: Map.Map Word16 Mime }
+newtype DefaultMimes = DefaultMimes { unDefMime :: Map.HashMap Word16 Mime }
 
 defaultMimes :: DefaultMimes
 defaultMimes = DefaultMimes $ Map.fromList $

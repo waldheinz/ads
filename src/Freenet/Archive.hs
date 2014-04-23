@@ -15,7 +15,7 @@ import Control.Exception ( catch, ErrorCall )
 import Control.Monad ( when, void )
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Cache.LRU as LRU
-import qualified Data.Map.Strict as Map
+import qualified Data.HashMap.Strict as Map
 import qualified Data.Text as T
 import System.Log.Logger
 
@@ -25,7 +25,7 @@ import Types
 
 -- |
 -- An Archive is just a map from file names to file contents.
-type Archive = Map.Map String BSL.ByteString
+type Archive = Map.HashMap String BSL.ByteString
 
 logI :: String -> IO ()
 logI m = infoM "freenet.archive" m
