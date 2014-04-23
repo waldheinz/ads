@@ -5,7 +5,7 @@ module Freenet.Ssk (
   SskRequest(..), SskBlock(..), mkSskBlock,
   sskLocation, sskLocation', sskEncryptDocname,
   decompressSsk,
-  
+
   -- * SSK Headers
   SskHeader, mkSskHeader, sskDataSize, sskHeaderSize,
 
@@ -33,6 +33,7 @@ import Freenet.Compression
 import Freenet.Pcfb
 import qualified Freenet.Rijndael as RD
 import Freenet.Types
+import Utils
 
 --------------------------------------------------------------------------------
 -- Header
@@ -65,7 +66,7 @@ mkSskHeader bs
   | otherwise = Left $ "SSK header length must be 136 bytes, got " `T.append` T.pack (show $ BS.length bs)
 
 sskHeaderHashId :: SskHeader -> Word16
-sskHeaderHashId h = runGet getWord16be $ BSL.fromStrict $ unSskHeader h
+sskHeaderHashId h = runGet getWord16be $ bsFromStrict $ unSskHeader h
 
 -- |
 -- Returns the signature (r, s) parameter for verifying the payload.
@@ -104,7 +105,7 @@ instance StorePersistable SskBlock where
     case mkSskBlock k h d pk of
       Right df -> return df
       Left e   -> fail $ T.unpack e
-  
+
 instance DataBlock SskBlock where
   dataBlockLocation (SskBlock loc _ _ _) = freenetLocation loc $ (2 `shiftL` 8) + 2
   decryptDataBlock                       = decryptSskBlock
@@ -127,8 +128,8 @@ mkSskBlock k h d pk
   | otherwise = Left "signature did not verify"
   where
     result = Right  $ SskBlock k pk h d
-    overallHash = BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [hashHeader, dataHash]
-    dataHash =  BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromStrict d
+    overallHash = bsToStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [hashHeader, dataHash]
+    dataHash =  bsToStrict $ bytestringDigest $ sha256 $ bsFromStrict d
     hashHeader = BS.take 72 $ unSskHeader h
     sig = uncurry DSA.Signature $ sskHeaderRS h
 
@@ -145,7 +146,7 @@ decryptSskBlock (SskBlock _ _ h d) key
 
     docKey = RD.initKey 32 $ BS.take 32 plainHeader
     docIv  = BS.take 32 plainHeader -- TODO: is this really a good idea? Freenet does so, we have no choice anyway, but still
-    origDataLength = (runGet getWord16be $ BSL.fromStrict $ BS.take 2 $ BS.drop 32 plainHeader) .&. 0x7fff
+    origDataLength = (runGet getWord16be $ bsFromStrict $ BS.take 2 $ BS.drop 32 plainHeader) .&. 0x7fff
 
     plainHeader = runST $ do
       pcfb <- mkPCFB headerKey headerIv
@@ -153,7 +154,7 @@ decryptSskBlock (SskBlock _ _ h d) key
 
     headerKey = RD.initKey 32 $ unKey key
     headerIv = sskHeaderEHDocname h
-    
+
 -- |
 -- for SSKs, the routing key is determined by
 -- H(PK) and the encrypted document name's hash E(H(docname))
@@ -171,18 +172,18 @@ sskLocation'
   :: Key    -- ^ hash (public key)
   -> Key    -- ^ encrypt ( hash ( docname ) )
   -> Key    -- ^ routing key
-sskLocation' hpk ehd = mkKey' $ BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unKey ehd, unKey hpk]
+sskLocation' hpk ehd = mkKey' $ bsToStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unKey ehd, unKey hpk]
 
 -- |
 -- encrypts the hash of an SSK document name. this is needed
 -- to determine the location of an SSK document
 sskEncryptDocname
-  :: Key    -- ^ the crypto key (second part of the SSK URI) 
+  :: Key    -- ^ the crypto key (second part of the SSK URI)
   -> T.Text -- ^ the document name (first path element of SSK URI)
   -> Key    -- ^ the encrypted document name
 sskEncryptDocname ckey docname = mkKey' $ RD.encipher rjk dnh where
   rjk = RD.initKey 32 $ unKey ckey -- prepare encryption key
-  dnh = BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromStrict (encodeUtf8 docname)
+  dnh = bsToStrict $ bytestringDigest $ sha256 $ bsFromStrict (encodeUtf8 docname)
 
 -----------------------------------------------------------------------------------------------
 -- DSA
@@ -192,13 +193,13 @@ putMpi :: Integer -> Put
 putMpi i = putWord16be (len * 8 - 8) >> putByteString bs where
   bs = i2bs i
   len = fromIntegral $ BS.length bs
-  
+
 getMpi :: Get Integer
 getMpi = do
   len <- (\x -> (x + 8) `div` 8) <$> getWord16be
   bs <- getByteString $ fromIntegral len
   return $ bs2i bs
-  
+
 putGroup :: DSA.Params -> Put
 putGroup (DSA.Params p g q) = putMpi p >> putMpi q >> putMpi g
 
@@ -218,11 +219,11 @@ instance Binary PubKey where
     grp    <- getGroup
     y      <- getMpi
     after  <- bytesRead
-    skip $ pubKeySize - (fromIntegral $ after - before) 
+    skip $ pubKeySize - (fromIntegral $ after - before)
     return $ PK (DSA.PublicKey grp y)
 
 mkPubKey :: BS.ByteString -> Either T.Text PubKey
-mkPubKey bs = case decodeOrFail (BSL.fromStrict bs) of
+mkPubKey bs = case decodeOrFail (bsFromStrict bs) of
   Left (_, _, e) -> Left $ T.pack e
   Right (_, _, pk) -> Right pk
 
@@ -235,7 +236,7 @@ putPublicKey :: PubKey -> Put
 putPublicKey (PK (DSA.PublicKey grp y)) = putGroup grp >> putMpi y
 
 hashPubKey :: PubKey -> Key
-hashPubKey pk = mkKey' $ BSL.toStrict $ bytestringDigest $ sha256 $ runPut $ putPublicKey pk
+hashPubKey pk = mkKey' $ bsToStrict $ bytestringDigest $ sha256 $ runPut $ putPublicKey pk
 
 putPk :: PubKey -> Put
 putPk pk = putLazyByteString d >> putLazyByteString pad where
@@ -264,13 +265,13 @@ data SskRequest = SskRequest
                   , sskReqEhd      :: ! Key
                   , sskReqAlg      :: ! Word8
                   } deriving ( Show )
-                  
+
 instance Binary SskRequest where
   put (SskRequest pk eh a) = put pk >> put eh >> put a
   get = SskRequest <$> get <*> get <*> get
-  
+
 instance DataRequest SskRequest where
   dataRequestLocation (SskRequest pkh ehd alg) = freenetLocation (sskLocation' pkh ehd) ((2 `shiftL` 8) + (fromIntegral alg))
-  
+
 decompressSsk :: CompressionCodec -> BSL.ByteString -> IO (Either T.Text BSL.ByteString)
 decompressSsk codec inp = decompress codec $ BSL.drop 2 inp
