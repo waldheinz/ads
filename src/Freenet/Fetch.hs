@@ -19,6 +19,7 @@ import Freenet.Metadata
 import Freenet.SplitFile
 import Freenet.URI
 import Peers
+import Utils
 
 logI :: String -> IO ()
 logI = infoM "freenet.fetch"
@@ -38,7 +39,7 @@ fetchUri fn uri = do
   
   case db of
     Left e  -> return $ Left e
-    Right (pt, ptl) -> let pt' = BSL.take (fromIntegral ptl) $ BSL.fromStrict pt
+    Right (pt, ptl) -> let pt' = BSL.take (fromIntegral ptl) $ bsFromStrict pt
                        in if isControlDocument uri
                           then case parseMetadata pt' of
                             Left e   -> return $ Left e
@@ -81,7 +82,7 @@ resolvePath fn ps (SimpleRedirect _ (RedirectKey _ uri)) arch = do
 
   case db of
     Left e  -> return $ Left $ "failed to fetch data while following key redirect: " `T.append` e
-    Right (pt, ptl) -> let pt' = BSL.take (fromIntegral ptl) $ BSL.fromStrict pt
+    Right (pt, ptl) -> let pt' = BSL.take (fromIntegral ptl) $ bsFromStrict pt
                        in if isControlDocument uri
                           then case parseMetadata pt' of
                             Left e   -> return $ Left $ "error parsing metadata while following key redirect: " `T.append` e
