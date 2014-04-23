@@ -19,6 +19,8 @@ import Foreign.Ptr
 import Foreign.Storable
 import qualified Data.Text as T
 
+import Utils
+
 -- |
 -- Supported compression algorithms
 data CompressionCodec = None | Gzip | Bzip2 | LZMA | LZMA_NEW deriving ( Eq, Ord, Show )
@@ -30,20 +32,13 @@ decompress comp cdata = case comp of
   Gzip     -> CE.catch (return $ Right $ Gzip.decompress cdata) ehandler
   LZMA     -> do
     lzma <- initLzma $ BS.pack [0x5d, 0x00, 0x00, 0x10, 0x00]
-    dec <- decodeLzma lzma $ toStrict cdata
-    return $ Right $ fromStrict dec
+    dec <- decodeLzma lzma $ bsToStrict cdata
+    return $ Right $ bsFromStrict dec
   LZMA_NEW -> do
     let (hdr, cd) = BSL.splitAt 5 cdata
-    lzma <- initLzma $ toStrict hdr
-    dec <- decodeLzma lzma $ toStrict cd
-    return $ Right $ fromStrict dec
-
-fromStrict :: BS.ByteString -> BSL.ByteString
-fromStrict bs = BSL.fromChunks [bs]
-
-toStrict :: BSL.ByteString -> BS.ByteString
-toStrict = BS.concat . BSL.toChunks
-
+    lzma <- initLzma $ bsToStrict hdr
+    dec <- decodeLzma lzma $ bsToStrict cd
+    return $ Right $ bsFromStrict dec
 
 ehandler :: CE.ErrorCall -> IO (Either T.Text BSL.ByteString)
 ehandler e = return $ Left $ "decompression failed: " `T.append` (T.pack $ show e)

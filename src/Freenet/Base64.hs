@@ -13,11 +13,12 @@ import Data.Bits ( shiftL, shiftR )
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
---import qualified Data.ByteString.Lazy.Builder as BLB
 import Data.ByteString.Base64
 import Data.Monoid ( (<>) )
 import qualified Data.Text as T
 import Data.Word
+
+import Utils
 
 -- |
 -- things that have a special base64 representation in Freenet
@@ -46,7 +47,7 @@ fromBase64Bs s = case dec of
   Right b -> Right b
   where
     dec = decode $ toStandardAlphabet bs
-    bs = BL.toStrict $ BL.concat
+    bs = bsToStrict $ BL.concat
          [ BLC.pack $ T.unpack s
          , BL.replicate pad $ toEnum $ fromEnum '='
          ]
