@@ -12,7 +12,8 @@ module Freenet.Base64 (
 import Data.Bits ( shiftL, shiftR )
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Lazy.Builder as BLB
+import qualified Data.ByteString.Lazy.Char8 as BLC
+--import qualified Data.ByteString.Lazy.Builder as BLB
 import Data.ByteString.Base64
 import Data.Monoid ( (<>) )
 import qualified Data.Text as T
@@ -46,7 +47,7 @@ fromBase64Bs s = case dec of
   where
     dec = decode $ toStandardAlphabet bs
     bs = BL.toStrict $ BL.concat
-         [ BLB.toLazyByteString $ BLB.string8 (T.unpack s)
+         [ BLC.pack $ T.unpack s
          , BL.replicate pad $ toEnum $ fromEnum '='
          ]
     pad

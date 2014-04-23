@@ -20,7 +20,7 @@ import Data.Binary.Get
 import Data.Binary.Put
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Lazy.Builder as BSB
+--import qualified Data.ByteString.Lazy.Builder as BSB
 import Data.Monoid
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8' )
@@ -208,7 +208,8 @@ mkChkExtra
   -> Bool          -- ^ control document
   -> ChkExtra      -- ^ resulting 5 bytes of CHK key "extra" data
 mkChkExtra crypt compr contr = ChkExtra $ BSL.toStrict $
-  BSB.toLazyByteString $ BSB.word8 0 <> BSB.word8 crypt <> BSB.word8 ctrl <> BSB.word16BE compr 
+  runPut $ putWord8 0 <> put crypt <> putWord8 ctrl <> put compr
+--  BSB.toLazyByteString $ BSB.word8 0 <> BSB.word8 crypt <> BSB.word8 ctrl <> BSB.word16BE compr 
   where
     ctrl = if contr then 2 else 0
 

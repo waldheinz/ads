@@ -23,7 +23,7 @@ executable ads
     
   cc-options:          -Wall -O2 -std=c99
   build-depends:
-    base                 >=4.6 && <4.7,
+    base                 ==4.*,
     aeson                >= 0.7,
     array                >= 0.4,
     async                >= 2.0,
@@ -31,14 +31,14 @@ executable ads
     base64-bytestring    >= 1.0,
     binary               >= 0.5,
     binary-conduit       >= 1.2,
-    bytestring           >= 0.10,
+    bytestring           >= 0.9,
     bzlib                >= 0.5,
     cipher-aes           >= 0.2,
     concurrent-extra     >= 0.7,
     conduit              >= 1.0,
     conduit-extra        >= 1.1,
     configurator         >= 0.2,
-    containers           >= 0.5,
+    containers           >= 0.4,
     cprng-aes            >= 0.5,
     crypto-pubkey        >= 0.2,
     directory            >= 1.2,
