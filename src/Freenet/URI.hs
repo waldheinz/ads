@@ -19,13 +19,13 @@ import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8' )
 
 import Freenet.Base64
 import Freenet.Compression
 import Freenet.Types  
+import Utils
 
 data URI
      = CHK
@@ -205,7 +205,7 @@ mkChkExtra
   -> Word16        -- ^ comptression algorithm
   -> Bool          -- ^ control document
   -> ChkExtra      -- ^ resulting 5 bytes of CHK key "extra" data
-mkChkExtra crypt compr contr = ChkExtra $ BSL.toStrict $
+mkChkExtra crypt compr contr = ChkExtra $ bsToStrict $
   runPut $ putWord8 0 >> put crypt >> putWord8 ctrl >> put compr
   where
     ctrl = if contr then 2 else 0
@@ -227,7 +227,7 @@ chkExtraCompression ce
     3 -> Right LZMA_NEW
     x -> Left $ "unknown CHK compression codec: " `T.append` (T.pack $ show x)
   where
-    c = decode $ BSL.fromStrict $ BS.drop 3 $ unChkExtra ce :: Word16
+    c = decode $ bsFromStrict $ BS.drop 3 $ unChkExtra ce :: Word16
     
 ---------------------------------------------------------------------------
 -- SSK specifics
