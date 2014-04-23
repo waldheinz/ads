@@ -11,7 +11,7 @@ import qualified Codec.Archive.Zip as ZIP
 import Control.Applicative ( (<$>) )
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
-import Control.Exception ( catch, ErrorCall )
+import qualified Control.Exception as CE
 import Control.Monad ( when, void )
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Cache.LRU as LRU
@@ -22,6 +22,7 @@ import System.Log.Logger
 import Freenet.Metadata
 import Freenet.SplitFile
 import Types
+import Utils
 
 -- |
 -- An Archive is just a map from file names to file contents.
@@ -77,8 +78,8 @@ fetchArchive' fetch tgt tp = do
   arch <- fetchRedirect' fetch tgt
 
   let
-    parseZip zbs = catch (return $ Right go) handler where
-      handler :: ErrorCall -> IO (Either T.Text Archive)
+    parseZip zbs = CE.catch (return $ Right go) handler where
+      handler :: CE.ErrorCall -> IO (Either T.Text Archive)
       handler e = return $ Left $ T.pack $ show e
       
       entries = ZIP.zEntries $ ZIP.toArchive zbs
@@ -101,8 +102,8 @@ fetchRedirect' fetch (RedirectKey _ uri) = do
   mbs <- getUriData fetch uri
   case mbs of
     Left e   -> return $ Left $ "fetchRedirect': error with requestNodeData: " `T.append` e
-    Right (bs, len) -> case parseMetadata (BSL.take (fromIntegral len) $ BSL.fromStrict bs) of
-      Left _  -> return $ Right $ BSL.take (fromIntegral len) $ BSL.fromStrict bs  -- return $ Left $ "fetchRedirect': can't parse metadata: " `T.append` e'
+    Right (bs, len) -> case parseMetadata (BSL.take (fromIntegral len) $ bsFromStrict bs) of
+      Left _  -> return $ Right $ BSL.take (fromIntegral len) $ bsFromStrict bs  -- return $ Left $ "fetchRedirect': can't parse metadata: " `T.append` e'
       Right md -> case md of
         ArchiveManifest (RedirectSplitFile sf) _ _ _ -> fetchSplitFile fetch sf
         _ -> return $ Left $ "fetchRedirect': what shall I do with metadata: " `T.append` (T.pack $ show md)
