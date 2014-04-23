@@ -30,7 +30,8 @@ import Freenet.Mime
 import Freenet.SplitFile
 import Freenet.Types
 import Freenet.URI
-     
+import Utils
+  
 ---------------------------------------------------------------------------------------
 -- Metadata Parsing
 ---------------------------------------------------------------------------------------
@@ -73,7 +74,7 @@ deriveCryptoKey hashes = lookup SHA256 hashes >>= \h -> case mkey h of
   Left _ -> Nothing
   Right k -> Just k
   where
-    mkey hash = mkKey $ BSL.toStrict $ bytestringDigest $ sha256 (BSL.fromChunks [hash, BSC.pack "SPLITKEY"] )
+    mkey hash = mkKey $ bsToStrict $ bytestringDigest $ sha256 (BSL.fromChunks [hash, BSC.pack "SPLITKEY"] )
 
 data Flag = FlagSplitFile | Hashes | SpecifySplitfileKey | HashThisLayer
           | TopSize | FullKeys | Compressed | NoMime | CompressedMime | Dbr
