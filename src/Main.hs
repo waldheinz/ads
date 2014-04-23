@@ -6,16 +6,19 @@ module Main ( main ) where
 import Control.Applicative ( (<$>) )
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
-import Control.Monad ( void, when )
-import Data.Aeson
+import Control.Monad ( unless, void, when )
+import qualified Data.Aeson as JSON
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import Network ( withSocketsDo )
 import Network.Wai.Handler.Warp as Warp
-import System.Directory ( getAppUserDataDirectory )
+import System.Directory ( createDirectoryIfMissing, doesFileExist, getAppUserDataDirectory )
 import System.Environment ( getArgs )
 import System.FilePath ( (</>) )
 import System.Posix.Signals (installHandler, Handler(Catch), sigINT, sigTERM)
+import System.Random ( getStdRandom )
+
+import Paths_ads
 
 import Freenet as FN
 import Freenet.Fproxy as FP
@@ -24,6 +27,7 @@ import Logging as LOG
 import Net
 import Node
 import RestApi
+import Types
 
 logE :: String -> IO ()
 logE m = errorM "main" m
@@ -35,50 +39,66 @@ sigHandler s = do
 
 main :: IO ()
 main = withSocketsDo $ do
+  infoM "main" "Starting up..."
+  
   RD.initRijndael
 
+  -- find and maybe create out home directory
   args <- getArgs
   appDir <- if null args then getAppUserDataDirectory "ads" else return (head args)
+  createDirectoryIfMissing True appDir
   
   -- install signal handler for shutdown handling
   shutdown <- newTVarIO False
   void $ installHandler sigINT (Catch $ sigHandler shutdown) Nothing
   void $ installHandler sigTERM (Catch $ sigHandler shutdown) Nothing
+
+  -- load (and maybe create) configuration file
+  let
+    cfgFile  = appDir </> "config"
+    infoFile = appDir </> "identity"
+    
+  doesFileExist cfgFile >>= \e -> unless e $ do
+    dfile <- getDataFileName "default-config"
+    BSL.readFile dfile >>= BSL.writeFile cfgFile
+  
+  cfg <- CFG.load [CFG.Required $ appDir </> "config"]
   
   -- initialize logging
-  cfg <- CFG.load [CFG.Required $ appDir </> "config"]
   LOG.initLogging $ CFG.subconfig "logging" cfg
-  
-  let
-    fnConfig = (CFG.subconfig "freenet" cfg)
-  
-  infoM "main" "Starting up..."
+
+  -- read (maybe create) identity
+  mNodeInfo <- doesFileExist infoFile >>= \e ->
+    if e
+    then JSON.decode <$> BSL.readFile infoFile
+    else do
+      nid <- getStdRandom randomNodeId
+      let result = NodeInfo nid ([] :: [TcpAddress])
+      BSL.writeFile infoFile $ JSON.encode result
+      return $ Just result
 
   -- start Freenet
-  fn <- FN.initFn fnConfig
+  fn <- FN.initFn $ CFG.subconfig "freenet" cfg
 
   -- start our node
-  mi <- eitherDecode <$> BSL.readFile (appDir </> "identity")
-  
-  node <- case mi of
-    Left e -> logE ("error reading node identity: " ++ e) >> error "can't continue"
-    Right ni -> do
-      infoM "main" $ show ni
-      n <- mkNode ni fn tcpConnect 
-      readPeers n appDir
-      nodeListen (CFG.subconfig "node.listen" cfg) n
-      return n
+  case mNodeInfo of
+    Nothing -> logE $ "problem with " ++ infoFile
+    Just nodeInfo -> do
+      node <- mkNode nodeInfo fn tcpConnect 
+      readPeers node appDir
+      nodeListen (CFG.subconfig "node.listen" cfg) node
+      
+      -- start HTTP Server
+      void $ forkIO $ Warp.run 8082 (restApi node)
 
-  -- start HTTP Server
-  void $ forkIO $ Warp.run 8082 (restApi node)
+      -- start fproxy
+      CFG.display cfg
+      fproxyEnabled <- CFG.require cfg "fproxy.enabled"
+      when fproxyEnabled $ do
+        fpPort <- CFG.require cfg "fproxy.port"
+        void $ forkIO $ Warp.run fpPort $ FP.fproxy node
 
-  -- start fproxy
-  fproxyEnabled <- CFG.require fnConfig "fproxy.enabled"
-  when fproxyEnabled $ do
-    fpPort <- CFG.require fnConfig "fproxy.port"
-    void $ forkIO $ Warp.run fpPort $ FP.fproxy node
+      -- wait for shutdown
+      atomically $ readTVar shutdown >>= check
 
-  -- wait for shutdown
-  atomically $ readTVar shutdown >>= check
-
-  shutdownFn fn
+      shutdownFn fn

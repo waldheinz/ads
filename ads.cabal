@@ -12,6 +12,9 @@ build-type:          Simple
 -- extra-source-files:
 cabal-version:       >=1.10
 
+data-files:
+	default-config
+
 executable ads
   main-is:             Main.hs
   ghc-options:         -Wall -O2 -threaded -XDeriveDataTypeable

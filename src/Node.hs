@@ -266,9 +266,11 @@ readPeers node dataDir = do
     kpFile = dataDir </> "peers"
     
   logI $ "reading known peers from " ++ kpFile
-  kpbs <- BSL.readFile kpFile
+  kpbs <- catchIOError
+          (eitherDecode <$> BSL.readFile kpFile)
+          (\e -> return $ Left $ show e)
   
-  case eitherDecode kpbs of
+  case kpbs of
     Left  e     -> logW ("error parsing peers file: " ++ e)
     Right peers -> do
       logI ("got " ++ show (length peers) ++ " peers")

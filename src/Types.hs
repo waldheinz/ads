@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Types (
-  NodeId, mkNodeId', keyToNodeId,
+  NodeId, mkNodeId', randomNodeId, keyToNodeId,
   nodeIdToDouble,
   NodeInfo(..),
   
@@ -26,6 +26,7 @@ import qualified Data.ByteString.Char8 as BSC
 import Data.Ratio ( (%) )
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
+import System.Random ( RandomGen, random )
 
 import qualified Freenet.URI as FN
 import qualified Freenet.Types as FN
@@ -86,6 +87,8 @@ mkNodeId' bs
 keyToNodeId :: FN.Key -> NodeId
 keyToNodeId key = mkNodeId' $ FN.unKey key
 
+randomNodeId :: RandomGen g => g -> (NodeId, g)
+randomNodeId g = let (bs, Just g') = BS.unfoldrN 32 (Just . random) g in (mkNodeId' bs, g')
 
 ----------------------------------------------------------------------
 -- Node Info

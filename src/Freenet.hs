@@ -14,6 +14,7 @@ import Control.Monad ( void )
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import qualified Data.Text as T
+import System.Directory ( createDirectoryIfMissing )
 import System.FilePath ( (</>) )
 
 import Freenet.Chk
@@ -35,6 +36,8 @@ initFn :: CFG.Config -> IO (Freenet a)
 initFn cfg = do
   -- datastore
   dsdir       <- CFG.require cfg "datastore.directory"
+  createDirectoryIfMissing True dsdir
+  
   chkCount    <- CFG.require cfg "datastore.chk-count"
   chkStore    <- FS.mkStoreFile (undefined :: ChkBlock) (dsdir </> "store-chk") chkCount
 
