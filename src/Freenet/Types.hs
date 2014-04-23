@@ -23,6 +23,7 @@ import Data.Hashable
 import qualified Data.Text as T
 
 import Freenet.Base64
+import Utils
 
 newtype Key = Key { unKey :: BS.ByteString } deriving ( Eq, Ord )
 
@@ -99,7 +100,7 @@ freenetLocation
   -> Word16       -- ^ the "type", see freenet.keys.Key.getType()
   -> Key          -- ^ the modified location
 freenetLocation key tp = mkKey' padded where
-  digest   = BSL.toStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unKey key, BSL.toStrict $ encode tp]
+  digest   = bsToStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unKey key, bsToStrict $ encode tp]
   digest'  = let (msb, lsb) = BS.splitAt 8 digest in bsToPosI $ (BS.reverse msb)  `BS.append` lsb
   digest''
     | testBit digest' 255 = (digest' `xor` (0xffffffffffffffff `shiftL` 192)) `shiftL` 1
