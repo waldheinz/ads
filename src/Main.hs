@@ -29,8 +29,11 @@ import Node
 import RestApi
 import Types
 
+logI :: String -> IO ()
+logI = infoM "main"
+
 logE :: String -> IO ()
-logE m = errorM "main" m
+logE = errorM "main"
 
 sigHandler :: TVar Bool -> IO ()
 sigHandler s = do
@@ -84,6 +87,7 @@ main = withSocketsDo $ do
   case mNodeInfo of
     Nothing -> logE $ "problem with " ++ infoFile
     Just nodeInfo -> do
+      logI $ "node identity is " ++ (show $ nodeId nodeInfo)
       node <- mkNode nodeInfo fn tcpConnect 
       readPeers node appDir
       nodeListen (CFG.subconfig "node.listen" cfg) node
