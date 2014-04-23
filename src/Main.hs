@@ -96,7 +96,6 @@ main = withSocketsDo $ do
       void $ forkIO $ Warp.run 8082 (restApi node)
 
       -- start fproxy
-      CFG.display cfg
       fproxyEnabled <- CFG.require cfg "fproxy.enabled"
       when fproxyEnabled $ do
         fpPort <- CFG.require cfg "fproxy.port"
