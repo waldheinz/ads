@@ -28,6 +28,7 @@ import Freenet.Pcfb
 import qualified Freenet.Rijndael as RD
 import Freenet.Store
 import Freenet.Types
+import Utils
 
 ------------------------------------------------------------------------------
 -- CHK headers
@@ -76,7 +77,7 @@ chkHeaderCipherLen = BS.drop 34 . unChkHeader
 -- The hash algoritm used to generate the digest at offset 2,
 -- only a value of 1, indicating SHA256, is currently used.
 chkHeaderHashId :: ChkHeader -> Word16
-chkHeaderHashId = runGet get . BSL.fromStrict . unChkHeader
+chkHeaderHashId = runGet get . bsFromStrict . unChkHeader
 
 data ChkBlock = ChkBlock
                 { chkBlockKey    :: ! Key           -- ^ location
@@ -114,7 +115,7 @@ instance Binary ChkBlock where
 
 mkChkBlock :: Key -> ChkHeader -> BS.ByteString -> Word8 -> Either T.Text ChkBlock
 mkChkBlock k h d calg
-  | hash == (BSL.fromStrict $ unKey k) = Right $ ChkBlock k calg h d
+  | hash == (bsFromStrict $ unKey k) = Right $ ChkBlock k calg h d
   | otherwise = Left "hash mismatch"
   where
     hash = bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
@@ -144,13 +145,13 @@ decryptChkAesPcfb header ciphertext key
       return (p, h')
     plaintext = plaintext' -- BS.take len plaintext'
     iv = BS.take 32 headers'
-    predIv = BSL.toStrict $ bytestringDigest $ sha256 (BSL.fromStrict $ unKey key)
-    len = fromIntegral $ runGet getWord16be $ BSL.fromStrict $ BS.drop 32 headers'
+    predIv = bsToStrict $ bytestringDigest $ sha256 (bsFromStrict $ unKey key)
+    len = fromIntegral $ runGet getWord16be $ bsFromStrict $ BS.drop 32 headers'
     
 decryptChkAesCtr :: ChkHeader -> BS.ByteString -> Key -> Either T.Text (BS.ByteString, Int)
 decryptChkAesCtr header ciphertext key
   | len > BS.length plaintext' = Left "invalid length"
-  | mac /= BSL.fromStrict hash = Left "mac mismatch when verifying CHK payload"
+  | mac /= bsFromStrict hash = Left "mac mismatch when verifying CHK payload"
   | otherwise = Right (plaintext', len)
   where
     hash = chkHeaderHash header
@@ -159,9 +160,8 @@ decryptChkAesCtr header ciphertext key
     aes = initAES $ unKey key
     plaintext'' = decryptCTR aes iv $ BS.concat [ciphertext, cipherLen] -- TODO get rid of the concat
     (plaintext', lenbytes) = BS.splitAt (BS.length ciphertext) plaintext''
-    len = fromIntegral $ runGet getWord16be $ BSL.fromStrict lenbytes
---    plaintext = BS.take len plaintext'
-    mac = bytestringDigest (hmacSha256 (BSL.fromStrict $ unKey key) (BSL.fromStrict plaintext''))
+    len = fromIntegral $ runGet getWord16be $ bsFromStrict lenbytes
+    mac = bytestringDigest (hmacSha256 (bsFromStrict $ unKey key) (bsFromStrict plaintext''))
 
 -------------------------------------------------------------------------------------------------
 -- Requesting CHKs
@@ -187,7 +187,7 @@ decompressChk
 decompressChk codec inp inpl
   | codec == None = return $ Right (inp, inpl)
   | otherwise     = do
-    dec <- decompress codec $ BSL.drop 4 $ BSL.fromStrict (BS.take inpl inp)
+    dec <- decompress codec $ BSL.drop 4 $ bsFromStrict (BS.take inpl inp)
     case dec of
       Left e     -> return $ Left $ "error decompressing data: " `T.append` e
-      Right dec' -> return $ Right (BSL.toStrict dec', fromIntegral $ BSL.length dec')
+      Right dec' -> return $ Right (bsToStrict dec', fromIntegral $ BSL.length dec')
