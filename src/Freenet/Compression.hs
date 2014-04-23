@@ -7,7 +7,7 @@ module Freenet.Compression (
 
 import qualified Codec.Compression.BZip as Bzip
 import qualified Codec.Compression.GZip as Gzip
-import Control.Exception ( catch, ErrorCall )
+import qualified Control.Exception as CE
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
 import qualified Data.ByteString.Lazy as BSL
@@ -26,19 +26,26 @@ data CompressionCodec = None | Gzip | Bzip2 | LZMA | LZMA_NEW deriving ( Eq, Ord
 decompress :: CompressionCodec -> BSL.ByteString -> IO (Either T.Text BSL.ByteString)
 decompress comp cdata = case comp of
   None     -> return $ Right $ cdata
-  Bzip2    -> catch (return $ Right $ Bzip.decompress $ BSL.pack [0x42, 0x5a] `BSL.append` cdata) ehandler
-  Gzip     -> catch (return $ Right $ Gzip.decompress cdata) ehandler
+  Bzip2    -> CE.catch (return $ Right $ Bzip.decompress $ BSL.pack [0x42, 0x5a] `BSL.append` cdata) ehandler
+  Gzip     -> CE.catch (return $ Right $ Gzip.decompress cdata) ehandler
   LZMA     -> do
     lzma <- initLzma $ BS.pack [0x5d, 0x00, 0x00, 0x10, 0x00]
-    dec <- decodeLzma lzma $ BSL.toStrict cdata
-    return $ Right $ BSL.fromStrict dec
+    dec <- decodeLzma lzma $ toStrict cdata
+    return $ Right $ fromStrict dec
   LZMA_NEW -> do
     let (hdr, cd) = BSL.splitAt 5 cdata
-    lzma <- initLzma $ BSL.toStrict hdr
-    dec <- decodeLzma lzma $ BSL.toStrict cd
-    return $ Right $ BSL.fromStrict dec
+    lzma <- initLzma $ toStrict hdr
+    dec <- decodeLzma lzma $ toStrict cd
+    return $ Right $ fromStrict dec
 
-ehandler :: ErrorCall -> IO (Either T.Text BSL.ByteString)
+fromStrict :: BS.ByteString -> BSL.ByteString
+fromStrict bs = BSL.fromChunks [bs]
+
+toStrict :: BSL.ByteString -> BS.ByteString
+toStrict = BS.concat . BSL.toChunks
+
+
+ehandler :: CE.ErrorCall -> IO (Either T.Text BSL.ByteString)
 ehandler e = return $ Left $ "decompression failed: " `T.append` (T.pack $ show e)
 
 ----------------------------------------------------------------------------------
