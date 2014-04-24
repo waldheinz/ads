@@ -28,7 +28,6 @@ import qualified Data.Conduit as C
 import qualified Data.Conduit.TQueue as C
 import Data.List ( nub )
 import qualified Data.HashMap.Strict as HMap
--- import qualified Data.Map.Strict as Map
 import Data.Maybe ( isJust )
 import qualified Data.Text as T
 import System.FilePath ( (</>) )
@@ -122,16 +121,16 @@ handlePeerMessages node pn msg = do
       Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
         local <- FN.getChk fn req
         case local of
-          Left _    -> sendRoutedMessage node rm (Just pn) Nothing -- (forwardResponse node mid)  -- pass on
+          Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
 
       Routed False rm@(RoutedMessage (FreenetSskRequest req) mid _) -> do
         local <- FN.getSsk fn req
         case local of
-          Left _    -> sendRoutedMessage node rm (Just pn) Nothing -- (forwardResponse node mid) -- pass on
+          Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
           
-      Routed True rm    -> sendRoutedMessage node rm Nothing Nothing -- backtrack
+      Routed True rm    -> sendRoutedMessage node rm Nothing -- backtrack
       Response mid msg' -> (atomically $ handleResponse node mid msg') >>=
                             \lm -> logD $ "routed " ++ show mid ++ ": " ++ show lm
 
@@ -156,15 +155,10 @@ handleResponse node mid msg = do
   case HMap.lookup mid m of
     Nothing -> return "no active message with this id"
     Just am -> do
-      -- notify local handler immediately, but only once
-      am' <- case amResponse am of
-        Nothing -> return am
-        Just h  -> h msg >> return am { amResponse = Nothing }
-
-      (m', logMsg) <- case amPreds am' of
+      (m', logMsg) <- case amPreds am of
         []      -> return (HMap.delete mid m, "no preds") -- if there are no preds, we can drop the AM
         (pn:[]) -> enqMessage pn (Response mid msg) >> return (HMap.delete mid m, "sent and dropped AM")
-        (pn:ps) -> enqMessage pn (Response mid msg) >> return (HMap.insert mid (am' { amPreds = ps }) m, "sent to " ++ show pn)
+        (pn:ps) -> enqMessage pn (Response mid msg) >> return (HMap.insert mid (am { amPreds = ps }) m, "sent to " ++ show pn)
 
       writeTVar (nodeActMsgs node) m' >> return logMsg
       
@@ -172,31 +166,28 @@ handleResponse node mid msg = do
 -- Routing
 -----------------------------------------------------------------------------------------------
 
-type ResponseHandler a = MessagePayload a -> STM String -- give back a log message
-
 data ActiveMessage a = ActiveMessage
                        { amStarted  :: Timestamp                 -- ^ when this message was sent off
                        , amPreds    :: [PeerNode a]              -- ^ predecessors (peers who think we're close to the target)
-                       , amResponse :: Maybe (ResponseHandler a) -- ^ what to do when the response arrives, only for locally generated messages
                        }
 
 instance Show a => Show (ActiveMessage a) where
-  show (ActiveMessage s ps _) = "ActiveMessage {amStarted=" ++ show s ++ ", amPreds=" ++ show ps ++ "}"
+  show (ActiveMessage s ps) = "ActiveMessage {amStarted=" ++ show s ++ ", amPreds=" ++ show ps ++ "}"
 
-mkRoutedMessage :: PeerAddress a => Node a -> NodeId -> MessagePayload a -> ResponseHandler a -> IO ()
-mkRoutedMessage node target msg onResponse = do
+mkRoutedMessage :: PeerAddress a => Node a -> NodeId -> MessagePayload a -> IO ()
+mkRoutedMessage node target msg = do
   mid <- atomically $ nextMessageId $ nodeMidGen node
-  sendRoutedMessage node (RoutedMessage msg mid $ NBO.mkRoutingInfo target) Nothing (Just onResponse)
+  sendRoutedMessage node (RoutedMessage msg mid $ NBO.mkRoutingInfo target) Nothing
 
-sendRoutedMessage :: PeerAddress a => Node a -> RoutedMessage a -> Maybe (PeerNode a) -> Maybe (ResponseHandler a) -> IO ()
-sendRoutedMessage node msg prev onResp = do
+sendRoutedMessage :: PeerAddress a => Node a -> RoutedMessage a -> Maybe (PeerNode a) -> IO ()
+sendRoutedMessage node msg prev = do
   now <- getTime
   
   logMsg <- atomically $ do
     -- create an ActiveMessage or update the message's timestamp
     let
       mid = rmId msg
-      go Nothing   = ActiveMessage now [] onResp
+      go Nothing   = ActiveMessage now []
       go (Just am) = am { amStarted = now }
       in modifyTVar' (nodeActMsgs node) $ \m -> HMap.insert mid (go $ HMap.lookup mid m) m
   
@@ -222,16 +213,15 @@ messagePopPred node mid = do
   
   let
     tgt = HMap.lookup mid m
-    m' = case tgt of
-      Just (ActiveMessage _ (_:[]) Nothing) -> HMap.delete mid m -- remote messages without any more preds can be dropped
-      Just (ActiveMessage s (_:xs) h      ) -> HMap.insert mid (ActiveMessage s xs h) m -- messages with more preds just get a pred removed
-      _                                     -> m -- a local message without preds is retained, because it may be routed somewhere else
-
-  writeTVar amMap m'
+    
+  writeTVar amMap $ case tgt of
+      Just (ActiveMessage _ (_:[])) -> HMap.delete mid m -- remote messages without any more preds can be dropped
+      Just (ActiveMessage s (_:xs)) -> HMap.insert mid (ActiveMessage s xs) m -- messages with more preds just get a pred removed
+      _                             -> m
   
   case tgt of
-    Just (ActiveMessage _ (x:_) _) -> return $ Just x
-    _                              -> return Nothing
+    Just (ActiveMessage _ (x:_)) -> return $ Just x
+    _                            -> return Nothing
 
 
 nodeRouteStatus :: Node a -> IO Value
@@ -520,7 +510,6 @@ requestNodeData n (FN.CHK loc key extra _) =
         Left _    -> do
           d <- request (nodeChkRequests n) req $ \r -> do
             mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetChkRequest r)
-              (\repl -> return $ "chk reply " ++ show repl)
           
           result <- atomically $ waitDelayed d
           
@@ -540,7 +529,6 @@ requestNodeData n (FN.SSK pkh key extra dn _) = do
     Left _    -> do
       d <- request (nodeSskRequests n) req $ \r -> do
         mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetSskRequest r)
-          (const $ return $ "ssk reply " ++ show req)
           
       result <- atomically $ waitDelayed d
           
@@ -563,7 +551,6 @@ requestNodeData n (FN.USK pkh key extra dn dr _) = do
         mkRoutedMessage n
           (keyToNodeId $ FN.dataRequestLocation req)
           (FreenetSskRequest r)
-          (\repl -> return $ "usk reply" ++ show repl)
           
       result <- atomically $ waitDelayed d
           
