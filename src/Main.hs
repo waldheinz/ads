@@ -6,7 +6,7 @@ module Main ( main ) where
 import Control.Applicative ( (<$>) )
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
-import Control.Monad ( unless, void, when )
+import Control.Monad ( unless, void )
 import qualified Data.Aeson as JSON
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
@@ -96,10 +96,10 @@ main = withSocketsDo $ do
       startRestApi (CFG.subconfig "node.http" cfg) node
       
       -- start fproxy
-      fproxyEnabled <- CFG.require cfg "fproxy.enabled"
-      when fproxyEnabled $ do
-        fpPort <- CFG.require cfg "fproxy.port"
-        void $ forkIO $ Warp.run fpPort $ FP.fproxy node
+      fpport <- CFG.lookup cfg "fproxy.port"
+      case fpport of
+        Nothing -> return ()
+        Just p -> void $ forkIO $ Warp.run p $ FP.fproxy node
 
       -- wait for shutdown
       atomically $ readTVar shutdown >>= check
