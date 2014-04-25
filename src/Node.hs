@@ -11,7 +11,10 @@ module Node (
   ConnectFunction,
   
   -- * other nodes we're connected to
-  PeerNode, runPeerNode  
+  PeerNode, runPeerNode,
+
+  -- * fetching data
+  nodeFetchChk
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -488,7 +491,27 @@ runPeerNode node (src, sink) expected = do
   
   -- let outgoing queue flush
   threadDelay $ 1000 * 1000
-  
+
+------------------------------------------------------------------------------------------
+-- fetching data
+------------------------------------------------------------------------------------------
+
+nodeFetchChk :: PeerAddress a => Node a -> FN.ChkRequest -> ((Either T.Text FN.ChkBlock) -> IO b) -> IO b
+nodeFetchChk node req k = do
+  fromStore <- FN.getChk (nodeFreenet node) req
+
+  case fromStore of
+    Right blk -> k $ Right blk
+    Left  _   -> do
+      d <- request (nodeChkRequests node) req $ \r -> do
+        mkRoutedMessage node (keyToNodeId $ FN.dataRequestLocation req) (FreenetChkRequest r)
+
+      result <- atomically $ waitDelayed d
+      
+      case result of
+        Nothing  -> k $ Left "timeout waiting for CHK data"
+        Just blk -> k $ Right blk
+          
 instance PeerAddress a => UriFetch (Node a) where
   getUriData = requestNodeData
 
@@ -496,27 +519,14 @@ requestNodeData :: PeerAddress a => Node a -> FN.URI -> IO (Either T.Text (BS.By
 requestNodeData n (FN.CHK loc key extra _) =
   case FN.chkExtraCompression extra of
     Left  e -> return $ Left $ "can't decompress CHK: " `T.append` e
-    Right c -> do
-      let
-        req = FN.ChkRequest loc (FN.chkExtraCrypto extra)
-        decrypt blk = case FN.decryptDataBlock blk key of
-          Left e        -> return $ Left $ "decrypting CHK data block failed: " `T.append` e
-          Right (p, pl) -> FN.decompressChk c p pl
- 
-      fromStore <- FN.getChk (nodeFreenet n) req
-
-      case fromStore of
-        Right blk -> decrypt blk
-        Left _    -> do
-          d <- request (nodeChkRequests n) req $ \r -> do
-            mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetChkRequest r)
-          
-          result <- atomically $ waitDelayed d
-          
-          case result of
-            Nothing  -> return $ Left "timeout waiting for CHK data"
-            Just blk -> decrypt blk
-            
+    Right c -> nodeFetchChk n (FN.ChkRequest loc $ FN.chkExtraCrypto extra) $ \result ->
+      case result of
+        Left e    -> return $ Left e
+        Right blk -> decrypt blk where
+          decrypt b = case FN.decryptDataBlock b key of
+            Left e        -> return $ Left $ "decrypting CHK data block failed: " `T.append` e
+            Right (p, pl) -> FN.decompressChk c p pl
+        
 requestNodeData n (FN.SSK pkh key extra dn _) = do
   let
     req = FN.SskRequest pkh (FN.sskEncryptDocname key dn) (FN.sskExtraCrypto extra)

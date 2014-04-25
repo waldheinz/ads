@@ -11,7 +11,9 @@ module Freenet.Types (
   StorePersistable(..)
   ) where
 
-import Control.Applicative ( (<$>) )
+import Control.Applicative ( (<$>), pure )
+import Control.Monad ( mzero )
+import qualified Data.Aeson as JSON
 import Data.Binary
 import Data.Binary.Put
 import Data.Binary.Get
@@ -39,6 +41,18 @@ instance Hashable Key where
 instance Binary Key where
   put (Key k) = putByteString k
   get = Key <$> getByteString keySize
+
+instance JSON.FromJSON Key where
+  parseJSON (JSON.String s) = case fromBase64' s of
+    Left e -> fail $ T.unpack e
+    Right bs -> case mkKey bs of
+      Right k -> pure k
+      Left e  -> fail $ T.unpack e
+    
+  parseJSON _ = mzero
+
+instance JSON.ToJSON Key where
+  toJSON = JSON.toJSON . toBase64' . unKey
 
 mkKey :: BS.ByteString -> Either T.Text Key
 mkKey bs = if BS.length bs == keySize

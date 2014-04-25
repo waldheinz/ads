@@ -29,7 +29,11 @@ body {
 <script>
 
 $(function() {
-  d3.json("./status/store/chk", function(error, json) {
+  d3.json("./api/status/store/chk", function(error, json) {
+    makeHist(json.histogram);
+  });
+
+  d3.json("./api/status/store/ssk", function(error, json) {
     makeHist(json.histogram);
   });
 })

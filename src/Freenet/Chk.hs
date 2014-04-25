@@ -11,8 +11,10 @@ module Freenet.Chk (
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
+import Control.Monad ( mzero )
 import Control.Monad.ST ( runST )
 import Crypto.Cipher.AES
+import Data.Aeson
 import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put ( putByteString )
@@ -88,6 +90,14 @@ data ChkBlock = ChkBlock
 
 instance Show ChkBlock where
   show (ChkBlock k _ h d) = "ChkFound {k=" ++ show k ++ ", h=" ++ (show h) ++ ", len=" ++ (show $ BS.length d) ++ "}"
+
+instance ToJSON ChkBlock where
+  toJSON (ChkBlock k c h d) = object
+                              [ "location"  .= k
+                              , "algorithm" .= c
+                              , "header"    .= (toJSON . toBase64' . unChkHeader) h
+                              , "data"      .= (toJSON . toBase64') d
+                              ]
 
 -- |
 -- Size of the CHK payload, which is 32kiB.
@@ -175,6 +185,12 @@ data ChkRequest = ChkRequest
 instance Binary ChkRequest where
   put (ChkRequest l h) = put l >> put h
   get = ChkRequest <$> get <*> get
+
+instance FromJSON ChkRequest where
+  parseJSON (Object v) = ChkRequest
+                         <$> v .: "location"
+                         <*> v .: "algorithm"
+  parseJSON _ = mzero
 
 instance DataRequest ChkRequest where
   dataRequestLocation (ChkRequest l a) = freenetLocation l $ (1 `shiftL` 8) + (fromIntegral $ a .&. 0xff)
