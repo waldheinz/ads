@@ -14,7 +14,7 @@ module Node (
   PeerNode, runPeerNode,
 
   -- * fetching data
-  nodeFetchChk
+  nodeFetchChk, nodeFetchSsk
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -511,7 +511,23 @@ nodeFetchChk node req k = do
       case result of
         Nothing  -> k $ Left "timeout waiting for CHK data"
         Just blk -> k $ Right blk
-          
+
+nodeFetchSsk :: PeerAddress a => Node a -> FN.SskRequest -> ((Either T.Text FN.SskBlock) -> IO b) -> IO b
+nodeFetchSsk node req k = do
+  fromStore <- FN.getSsk (nodeFreenet node) req
+
+  case fromStore of
+    Right blk -> k $ Right blk
+    Left  _   -> do
+      d <- request (nodeSskRequests node) req $ \r -> do
+        mkRoutedMessage node (keyToNodeId $ FN.dataRequestLocation req) (FreenetSskRequest r)
+
+      result <- atomically $ waitDelayed d
+      
+      case result of
+        Nothing  -> k $ Left "timeout waiting for SSK data"
+        Just blk -> k $ Right blk
+                    
 instance PeerAddress a => UriFetch (Node a) where
   getUriData = requestNodeData
 
@@ -585,7 +601,7 @@ data RequestManager r d = RequestManager
 mkRequestManager :: STM (RequestManager r d)
 mkRequestManager = do
   reqs <- newTVar HMap.empty
-  return $! RequestManager reqs (20 * 1000 * 1000)
+  return $! RequestManager reqs (60 * 1000 * 1000)
 
 offer :: (FN.DataBlock d) => d -> RequestManager r d -> STM ()
 offer db rmgr = do

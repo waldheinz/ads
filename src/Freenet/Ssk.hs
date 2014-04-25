@@ -14,7 +14,9 @@ module Freenet.Ssk (
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
+import Control.Monad ( mzero )
 import Control.Monad.ST ( runST )
+import qualified Data.Aeson as JSON
 import Data.Binary
 import Data.Binary.Get
 import Data.Bits ( (.&.), (.|.), shiftL )
@@ -109,11 +111,18 @@ instance StorePersistable SskBlock where
 instance DataBlock SskBlock where
   dataBlockLocation (SskBlock loc _ _ _) = freenetLocation loc $ (2 `shiftL` 8) + 2
   decryptDataBlock                       = decryptSskBlock
---   dataBlockType                          = const $ (2 `shiftL` 8) + 2
 
 instance Binary SskBlock where
   put = storePut
   get = storeGet
+
+instance JSON.ToJSON SskBlock where
+  toJSON (SskBlock l pk h d) = JSON.object
+                              [ "location" JSON..= l
+                              , "header"   JSON..= (toBase64' . unSskHeader) h
+                              , "data"     JSON..= (toBase64') d
+                              , "pubKey"   JSON..= pk
+                              ]
 
 mkSskBlock
   :: Key                      -- ^ location
@@ -222,6 +231,14 @@ instance Binary PubKey where
     skip $ pubKeySize - (fromIntegral $ after - before)
     return $ PK (DSA.PublicKey grp y)
 
+instance JSON.ToJSON PubKey where
+  toJSON (PK (DSA.PublicKey (DSA.Params p g q) y)) =
+    JSON.object [ "p" JSON..= toBase64' p
+                , "g" JSON..= toBase64' g
+                , "q" JSON..= toBase64' q
+                , "y" JSON..= toBase64' y
+                ]
+
 mkPubKey :: BS.ByteString -> Either T.Text PubKey
 mkPubKey bs = case decodeOrFail (bsFromStrict bs) of
   Left (_, _, e) -> Left $ T.pack e
@@ -273,5 +290,12 @@ instance Binary SskRequest where
 instance DataRequest SskRequest where
   dataRequestLocation (SskRequest pkh ehd alg) = freenetLocation (sskLocation' pkh ehd) ((2 `shiftL` 8) + (fromIntegral alg))
 
+instance JSON.FromJSON SskRequest where
+  parseJSON (JSON.Object v) = SskRequest
+                              <$> v JSON..: "pubKeyHash"
+                              <*> v JSON..: "ehDocName"
+                              <*> v JSON..: "algorithm"
+  parseJSON _ = mzero
+  
 decompressSsk :: CompressionCodec -> BSL.ByteString -> IO (Either T.Text BSL.ByteString)
 decompressSsk codec inp = decompress codec $ BSL.drop 2 inp

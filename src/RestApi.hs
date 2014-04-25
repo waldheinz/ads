@@ -25,7 +25,8 @@ restApi :: (PeerAddress a, ToJSON a) => Node a -> WAI.Application
 restApi node = mapUrls $
   mount "api"
     ( mount "fetch"
-      ( mount "chk" (fetchChk node)
+      (  mount "chk" (fetchChk node)
+     <|> mount "ssk" (fetchSsk node)   
       )
    <|> mount "status"
       (  mount "peers"   (connStatus node)
@@ -67,6 +68,17 @@ fetchChk node req = do
   case chkReq of
     Left e  -> badRequest (T.pack e) req
     Right r -> nodeFetchChk node r $ \result -> do
+      case result of
+        Left e    -> badRequest e req
+        Right blk -> jsonResponse blk req
+        
+fetchSsk :: PeerAddress a => Node a -> WAI.Application
+fetchSsk node req = do
+  chkReq <- eitherDecode <$> WAI.lazyRequestBody req
+  
+  case chkReq of
+    Left e  -> badRequest (T.pack e) req
+    Right r -> nodeFetchSsk node r $ \result -> do
       case result of
         Left e    -> badRequest e req
         Right blk -> jsonResponse blk req
