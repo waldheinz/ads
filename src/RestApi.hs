@@ -2,17 +2,23 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module RestApi (
-  restApi
+  startRestApi
   ) where
 
 import Control.Applicative ( (<|>), (<$>) )
+import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
+import Control.Monad ( void )
 import Data.Aeson
+import qualified Data.Configurator as CFG
+import qualified Data.Configurator.Types as CFG
+import Data.String ( fromString )
 import qualified Data.Text as T
 import Data.Text.Encoding ( encodeUtf8 )
 import Network.HTTP.Types ( status200, status400 )
 import qualified Network.Wai as WAI
 import Network.Wai.Application.Static
+import Network.Wai.Handler.Warp as Warp
 import Network.Wai.UrlMap
 
 import Freenet
@@ -20,6 +26,18 @@ import Node
 import Peers
 import Types
 import Utils
+
+startRestApi :: (PeerAddress a, ToJSON a) => CFG.Config -> Node a -> IO ()
+startRestApi cfg node = do
+  host <- CFG.lookup cfg "host"
+  port <- CFG.lookupDefault 8080 cfg "port"
+  
+  case host of
+    Nothing -> return ()
+    Just h  -> do
+      void $ forkIO $ Warp.runSettings
+        (Warp.setHost (fromString h) $ Warp.setPort port $ Warp.defaultSettings)
+        (restApi node)
 
 restApi :: (PeerAddress a, ToJSON a) => Node a -> WAI.Application
 restApi node = mapUrls $

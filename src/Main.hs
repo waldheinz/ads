@@ -93,8 +93,8 @@ main = withSocketsDo $ do
       nodeListen (CFG.subconfig "node.listen" cfg) node
       
       -- start HTTP Server
-      void $ forkIO $ Warp.run 8082 (restApi node)
-
+      startRestApi (CFG.subconfig "node.http" cfg) node
+      
       -- start fproxy
       fproxyEnabled <- CFG.require cfg "fproxy.enabled"
       when fproxyEnabled $ do

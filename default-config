@@ -4,6 +4,11 @@ node {
     host = "*"
     port = 63763
   }
+
+  http {
+    host = "localhost"
+    port = 8080
+  }
 }
 
 logging {
