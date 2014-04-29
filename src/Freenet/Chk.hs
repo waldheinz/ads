@@ -4,6 +4,7 @@
 module Freenet.Chk (
   -- * Working with CHKs
   ChkRequest(..), ChkBlock(..), mkChkBlock, decompressChk,
+  encryptChk,
 
   -- * CHK Headers
   ChkHeader, mkChkHeader, unChkHeader, chkHeaderHashId,
@@ -17,7 +18,7 @@ import Crypto.Cipher.AES
 import Data.Aeson
 import Data.Binary
 import Data.Binary.Get
-import Data.Binary.Put ( putByteString )
+import Data.Binary.Put ( putByteString, putWord16be, runPut )
 import Data.Bits ( (.&.), shiftL )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
@@ -58,7 +59,7 @@ instance Binary ChkHeader where
   get = ChkHeader <$> getByteString chkHeaderSize
 
 -- |
--- Creates right the header from a bytestring of 32 bytes.
+-- Creates right the header from a bytestring of 36 bytes.
 mkChkHeader :: BS.ByteString -> Either T.Text ChkHeader
 mkChkHeader bs
   | BS.length bs == chkHeaderSize = Right $ ChkHeader bs
@@ -117,16 +118,19 @@ instance StorePersistable ChkBlock where
 instance DataBlock ChkBlock where
   dataBlockLocation (ChkBlock k c _ _)   = freenetLocation k $ (1 `shiftL` 8) + (fromIntegral $ c .&. 0xff)
   decryptDataBlock                       = decryptChk
---  dataBlockType (ChkBlock _ crypto _ _)  = (1 `shiftL` 8) + (fromIntegral $ crypto .&. 0xff)
   
 instance Binary ChkBlock where
   put = storePut
   get = storeGet
 
+-- |
+-- creates a @ChkBlock@ from it's ingredients, verifying the hash and size of
+-- the data block
 mkChkBlock :: Key -> ChkHeader -> BS.ByteString -> Word8 -> Either T.Text ChkBlock
 mkChkBlock k h d calg
-  | hash == (bsFromStrict $ unKey k) = Right $ ChkBlock k calg h d
-  | otherwise = Left "hash mismatch"
+  | hash /= (bsFromStrict $ unKey k) = Left "hash mismatch"
+  | BS.length d /= chkDataSize = Left "CHK data must be 32kiB"
+  | otherwise = Right $ ChkBlock k calg h d
   where
     hash = bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader h, d]
 
@@ -172,6 +176,23 @@ decryptChkAesCtr header ciphertext key
     (plaintext', lenbytes) = BS.splitAt (BS.length ciphertext) plaintext''
     len = fromIntegral $ runGet getWord16be $ bsFromStrict lenbytes
     mac = bytestringDigest (hmacSha256 (bsFromStrict $ unKey key) (bsFromStrict plaintext''))
+
+-- |
+-- encrypts some data (which must be <= chkDataSize in length) using some encryption
+-- key, and returns the resulting @ChkBlock@
+encryptChk :: BS.ByteString -> Key -> Either T.Text ChkBlock
+encryptChk d k
+  | payloadSize > chkDataSize = Left "CHK payload > 32kiB"
+  | otherwise = Right $ ChkBlock loc 3 hdr ciphertext
+  where
+    hdr         = ChkHeader $ bsToStrict $ runPut $ putWord16be 1 >> putByteString mac >> putByteString cipherLen
+    payloadSize = BS.length d
+    plaintext   = BS.concat [d, bsToStrict $ runPut $ putWord16be $ fromIntegral payloadSize]
+    (ciphertext, cipherLen) = BS.splitAt chkDataSize $ encryptCTR aes iv plaintext
+    aes = initAES $ unKey k
+    iv = BS.take 16 mac
+    mac = bsToStrict $ bytestringDigest $ hmacSha256 (bsFromStrict $ unKey k) (bsFromStrict plaintext)
+    loc = mkKey' $ bsToStrict $ bytestringDigest $ sha256 $ BSL.fromChunks [unChkHeader hdr, ciphertext]
 
 -------------------------------------------------------------------------------------------------
 -- Requesting CHKs
