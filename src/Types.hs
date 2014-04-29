@@ -118,8 +118,10 @@ instance ToJSON a => ToJSON (NodeInfo a) where
               ]
 
 -----------------------------------------------------------------
--- Fetching Data
+-- inserting / fetching data
 -----------------------------------------------------------------
 
 class UriFetch a where
   getUriData :: a -> FN.URI -> IO (Either T.Text (BS.ByteString, Int))
+
+  

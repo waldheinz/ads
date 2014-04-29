@@ -531,6 +531,9 @@ nodeFetchSsk node req k = do
 instance PeerAddress a => UriFetch (Node a) where
   getUriData = requestNodeData
 
+instance PeerAddress a => FN.ChkInsert (Node a) where
+  insertChk node chk = FN.offerChk (nodeFreenet node) chk
+
 requestNodeData :: PeerAddress a => Node a -> FN.URI -> IO (Either T.Text (BS.ByteString, Int))
 requestNodeData n (FN.CHK loc key extra _) =
   case FN.chkExtraCompression extra of

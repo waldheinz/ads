@@ -9,19 +9,23 @@ import Control.Applicative ( (<|>), (<$>) )
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
 import Control.Monad ( void )
+import Control.Monad.IO.Class ( liftIO )
 import Data.Aeson
+import qualified Data.Conduit.Utils as CU
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import Data.String ( fromString )
 import qualified Data.Text as T
-import Data.Text.Encoding ( encodeUtf8 )
+import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
 import Network.HTTP.Types ( status200, status400 )
 import qualified Network.Wai as WAI
 import Network.Wai.Application.Static
 import Network.Wai.Handler.Warp as Warp
+import qualified Network.Wai.Parse as WAI
 import Network.Wai.UrlMap
 
 import Freenet
+import Freenet.Insert
 import Node
 import Peers
 import Types
@@ -43,9 +47,12 @@ restApi :: (PeerAddress a, ToJSON a) => Node a -> WAI.Application
 restApi node = mapUrls $
   mount "api"
     ( mount "fetch"
-      (  mount "chk" (fetchChk node)
-     <|> mount "ssk" (fetchSsk node)   
-      )
+     (  mount "chk" (fetchChk node)
+    <|> mount "ssk" (fetchSsk node)   
+     )
+   <|> mount "insert"
+      ( mount "file" (insertFile node)
+      )  
    <|> mount "status"
       (  mount "peers"   (connStatus node)
      <|> mount "routing" (routeStatus node)   
@@ -100,4 +107,19 @@ fetchSsk node req = do
       case result of
         Left e    -> badRequest e req
         Right blk -> jsonResponse blk req
+
+--insertBackend :: Node a -> WAI.BackEnd (Sink 
+--insertBackend node pn fi = do
+--  (bsrc, bsink) <- liftIO $ CU.pairTQueue
+--  prog <- liftIO $ void $ liftIO $ insert InsertCHK (InsertDirect bsrc (decodeUtf8 $ WAI.fileContentType fi))
+--  return bsink
         
+insertFile :: PeerAddress a => Node a -> WAI.Application
+insertFile node req = do
+  case WAI.getRequestBodyType req of
+    Nothing -> badRequest "must post url encoded or multipart data here" req
+    Just bt -> do
+      (params, files) <- WAI.parseRequestBody WAI.lbsBackEnd req
+      uris <- mapM (\(_, fi) -> insert node InsertCHK (InsertDirect (WAI.fileContent fi) (decodeUtf8 $ WAI.fileContentType fi))) files
+      badRequest (T.pack $ show uris) req
+      

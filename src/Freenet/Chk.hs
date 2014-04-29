@@ -4,7 +4,7 @@
 module Freenet.Chk (
   -- * Working with CHKs
   ChkRequest(..), ChkBlock(..), mkChkBlock, decompressChk,
-  encryptChk,
+  encryptChk, ChkInsert(..), chkBlockUri,
 
   -- * CHK Headers
   ChkHeader, mkChkHeader, unChkHeader, chkHeaderHashId,
@@ -31,7 +31,11 @@ import Freenet.Pcfb
 import qualified Freenet.Rijndael as RD
 import Freenet.Store
 import Freenet.Types
+import Freenet.URI
 import Utils
+
+class ChkInsert a where
+  insertChk :: a -> ChkBlock -> IO ()
 
 ------------------------------------------------------------------------------
 -- CHK headers
@@ -123,6 +127,12 @@ instance Binary ChkBlock where
   put = storePut
   get = storeGet
 
+chkBlockUri
+  :: ChkBlock
+  -> Key
+  -> URI
+chkBlockUri blk ck = CHK (chkBlockKey blk) ck (mkChkExtra 3 (-1) False) []
+
 -- |
 -- creates a @ChkBlock@ from it's ingredients, verifying the hash and size of
 -- the data block
@@ -180,10 +190,10 @@ decryptChkAesCtr header ciphertext key
 -- |
 -- encrypts some data (which must be <= chkDataSize in length) using some encryption
 -- key, and returns the resulting @ChkBlock@
-encryptChk :: BS.ByteString -> Key -> Either T.Text ChkBlock
+encryptChk :: BS.ByteString -> Key -> ChkBlock
 encryptChk d k
-  | payloadSize > chkDataSize = Left "CHK payload > 32kiB"
-  | otherwise = mkChkBlock loc hdr ciphertext 3 --ChkBlock loc 3 hdr ciphertext
+  | payloadSize > chkDataSize = error "CHK payload > 32kiB"
+  | otherwise = ChkBlock loc 3 hdr ciphertext
   where
     hdr         = ChkHeader $ bsToStrict $ runPut $ putWord16be 1 >> putByteString mac >> putByteString cipherLen
     payloadSize = BS.length d
