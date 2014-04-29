@@ -183,11 +183,12 @@ decryptChkAesCtr header ciphertext key
 encryptChk :: BS.ByteString -> Key -> Either T.Text ChkBlock
 encryptChk d k
   | payloadSize > chkDataSize = Left "CHK payload > 32kiB"
-  | otherwise = Right $ ChkBlock loc 3 hdr ciphertext
+  | otherwise = mkChkBlock loc hdr ciphertext 3 --ChkBlock loc 3 hdr ciphertext
   where
     hdr         = ChkHeader $ bsToStrict $ runPut $ putWord16be 1 >> putByteString mac >> putByteString cipherLen
     payloadSize = BS.length d
-    plaintext   = BS.concat [d, bsToStrict $ runPut $ putWord16be $ fromIntegral payloadSize]
+    padding     = BS.replicate (chkDataSize - payloadSize) 0
+    plaintext   = BS.concat [d, padding, bsToStrict $ runPut $ putWord16be $ fromIntegral payloadSize]
     (ciphertext, cipherLen) = BS.splitAt chkDataSize $ encryptCTR aes iv plaintext
     aes = initAES $ unKey k
     iv = BS.take 16 mac
