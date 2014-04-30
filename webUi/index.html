@@ -1,98 +1,55 @@
-
 <!DOCTYPE html>
-<meta charset="utf-8">
-<style>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bootstrap 101 Template</title>
 
-body {
-  font: 10px sans-serif;
-}
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+    <link href="css/node-status.css" rel="stylesheet">
+    <style> body { padding: 15px; }</style>
+  </head>
+  <body>
 
-.bar rect {
-  fill: steelblue;
-  shape-rendering: crispEdges;
-}
+    <div class="navbar navbar-inverse" role="navigation">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="#">ADS</a>
+        </div>
+        <div class="collapse navbar-collapse">
+          <ul class="nav navbar-nav">
+            <li class="active"><a href="#">Home</a></li>
+            <li><a href="#fms">FMS</a></li>
+            <li><a href="#status">Status</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
 
-.bar text {
-  fill: #fff;
-}
+    <div class="container">
+        <h1>Home</h1>
+    </div>
 
-.axis path, .axis line {
-  fill: none;
-  stroke: #000;
-  shape-rendering: crispEdges;
-}
+    <script src="js/jquery-2.1.0.min.js"></script>
+    <script src="js/bootstrap.min.js"></script>
+    <script src="js/d3.min.js"></script>
+    <script src="js/node-status.js"></script>
 
-</style>
-<body>
-<script src="./js/d3.min.js"></script>
-<script src="./js/jquery-2.1.0.min.js"></script>
-<script>
-
-$(function() {
-  d3.json("./api/status/store/chk", function(error, json) {
-    makeHist(json.histogram);
-  });
-
-  d3.json("./api/status/store/ssk", function(error, json) {
-    makeHist(json.histogram);
-  });
-})
-
-function makeHist(data) {
-
-// Generate a Bates distribution of 10 random variables.
-//var values = d3.range(1000).map(d3.random.bates(10));
-
-// A formatter for counts.
-var formatCount = d3.format(",.0f");
-
-var margin = {top: 10, right: 30, bottom: 30, left: 30},
-    width = 452 + margin.left + margin.right,
-    height = 128 - margin.top - margin.bottom;
-
-var x = d3.scale.linear()
-    .domain([0, 1])
-    .range([0, width]);
-
-var y = d3.scale.linear()
-    .domain([0, d3.max(data, function(d) { return d[1]; })])
-    .range([height, 0]);
-
-var xAxis = d3.svg.axis()
-    .scale(x)
-    .orient("bottom");
-
-var svg = d3.select("body").append("svg")
-    .attr("width", width + margin.left + margin.right)
-    .attr("height", height + margin.top + margin.bottom)
-  .append("g")
-    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
-
-var bar = svg.selectAll(".bar")
-    .data(data)
-  .enter().append("g")
-    .attr("class", "bar")
-    .attr("transform", function(d) { return "translate(" + x(d[0] / 256) + "," + y(d[1]) + ")"; });
-
-bar.append("rect")
-    .attr("x", 1)
-    .attr("width", 1)
-    .attr("height", function(d) { return height - y(d[1]); });
-/*
-bar.append("text")
-    .attr("dy", ".75em")
-    .attr("y", 6)
-    .attr("x", x(data[0].dx) / 2)
-    .attr("text-anchor", "middle")
-    .text(function(d) { return formatCount(d.y); });
-*/
-
-svg.append("g")
-    .attr("class", "x axis")
-    .attr("transform", "translate(0," + height + ")")
-    .call(xAxis);
-}
-
-</script>
-</body>
-
+    <script>
+        $(function() {
+            d3.json("./api/status/store/chk", function(error, json) {
+                makeHist(json.histogram);
+                d3.json("./api/status/store/ssk", function(error, json) {
+                    makeHist(json.histogram);
+                });
+            });
+        });
+    </script>
+  </body>
+</html>
