@@ -4,8 +4,10 @@
 module Node (
   -- * our node
   Node, mkNode, readPeers,
-  requestNodeData, nodeArchives, nodePeers,
-  nodeFreenet, nodeRouteStatus,
+  requestNodeData, nodeArchives,
+  nodeFreenet,
+
+  nodeRouteStatus, nodeConnectStatus,
   
   -- * peers
   ConnectFunction,
@@ -226,7 +228,6 @@ messagePopPred node mid = do
     Just (ActiveMessage _ (x:_)) -> return $ Just x
     _                            -> return Nothing
 
-
 nodeRouteStatus :: Node a -> IO Value
 nodeRouteStatus node = do
   now <- getTime
@@ -353,25 +354,33 @@ maintainConnections node connect = forever $ do
 -- A @PeerNode@ is a @Peer@ we're currently connected to.
 data PeerNode a
   = PeerNode
-    { pnPeer        :: Peer a               -- ^ the peer
-    , pnQueue       :: TBMQueue (Message a) -- ^ outgoing message queue
---    , pnLastMessage :: TVar Timestamp       -- ^ when the last message was received
+    { pnPeer      :: Peer a               -- ^ the peer
+    , pnQueue     :: TBMQueue (Message a) -- ^ outgoing message queue
+    , pnConnected :: Timestamp            -- ^ when this peer connected
     }
     
 instance (Show a) => Show (PeerNode a) where
   show n = "Node {peer = " ++ show (peerId $ pnPeer n) ++ " }"
 
 instance Eq (PeerNode a) where
-  (PeerNode p1 _) == (PeerNode p2 _) = p1 == p2
+  (PeerNode p1 _ _) == (PeerNode p2 _ _) = p1 == p2
 
-instance ToJSON a => ToStateJSON (PeerNode a) where
-  toStateJSON pn = do
---    lm <- readTVar $ pnLastMessage pn
-    p <- toStateJSON pn
-    return $ object
-      [ "peer"        .= p
---     , "lastMessage" .= (fromIntegral lm)
-      ]
+nodeConnectStatus :: ToJSON a => Node a -> IO Value
+nodeConnectStatus node = do
+  now <- getTime
+  let 
+      pnJSON pn = do
+        p   <- toStateJSON $ pnPeer pn
+        oqs <- freeSlotsTBMQueue $ pnQueue pn
+           
+        return $ object
+                   [ "peer"         .= p
+                   , "outQueueFree" .= oqs
+                   , "connectedFor" .= timeDiff (pnConnected pn) now
+                   ]
+        
+  cs <- atomically $ readTVar (nodePeerNodes node) >>= mapM pnJSON
+  return $ object [ "connected" .= cs ]
 
 -- | puts a message on the Node's outgoing message queue       
 enqMessage :: PeerNode a -> Message a -> STM ()
@@ -391,7 +400,8 @@ runPeerNode
 runPeerNode node (src, sink) expected = do
   outq <- newTBMQueueIO 10
   inq  <- newTBMQueueIO 10
-
+  now  <- getTime
+  
   let
     enqDirect msg = writeTBMQueue outq $ Direct msg
     
@@ -407,7 +417,7 @@ runPeerNode node (src, sink) expected = do
         
     mkPn ninfo = do
       p <- mkPeer ninfo
-      return $ PeerNode p outq
+      return $ PeerNode p outq now
 
     -- inject a ping every 30s to prevent timeout on the other side
     sendPings = do
@@ -420,11 +430,7 @@ runPeerNode node (src, sink) expected = do
             f <- isFullTBMQueue outq
             unless f $ writeTBMQueue outq (Direct Ping)
             return False
-{-          
-        (isClosedTBMQueue outq >>= \c -> if c then return True else retry) `orElse`
-        (isFullTBMQueue outq  >>= \f -> if f then return False else retry) `orElse`
-        (writeTBMQueue outq (Direct Ping)
-  -}              
+
       unless closed sendPings
     
     handshake ni = atomically $ do

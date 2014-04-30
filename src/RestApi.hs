@@ -66,7 +66,7 @@ webUi :: WAI.Application
 webUi = staticApp $ defaultFileServerSettings "./webUi"
   
 connStatus :: ToJSON a => Node a -> WAI.Application
-connStatus n = stateJsonResponse $ nodePeers n
+connStatus n r = nodeConnectStatus n >>= \o -> jsonResponse o r
 
 routeStatus :: ToJSON a => Node a -> WAI.Application
 routeStatus n r = nodeRouteStatus n >>= \o -> jsonResponse o r
