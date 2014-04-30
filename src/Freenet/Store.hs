@@ -11,7 +11,7 @@ module Freenet.Store (
 
 import qualified Control.Concurrent.Lock as Lock
 import Control.Concurrent.STM
-import Control.Monad ( unless, void, when )
+import Control.Monad ( replicateM, unless, void, when )
 import Data.Aeson
 import Data.Binary
 import Data.Binary.Get ( runGetOrFail )
@@ -35,7 +35,7 @@ import Types
 data StoreFile f = StoreFile
                      { sfLock        :: ! Lock.Lock -- ^ for accessing the handle
                      , sfFileName    :: ! FilePath
-                     , sfHandle      :: ! Handle
+--                     , sfHandles     :: ! (TVar [Handle])
                      , sfEntrySize   :: ! Int
                      , sfEntryCount  :: ! Int
                      , sfReads       :: ! (TVar Word64) -- ^ total number of reads
@@ -75,9 +75,12 @@ mkStoreFile sp fileName count = do
   rds  <- newTVarIO 0
   scs  <- newTVarIO 0
   lck  <- Lock.new
+ -- hnds <- newTVarIO handles
   (needScan, hist) <- readStats fileName
   
-  let sf = StoreFile lck fileName handle entrySize count rds scs hist (readOffset sf) (writeOffset sf)
+  let sf = StoreFile lck fileName entrySize count rds scs hist
+           (readOffset sf handle) (writeOffset sf handle)
+           
   when needScan $ void $ scanStore sf
   
   return sf
@@ -101,7 +104,7 @@ shutdownStore :: StoreFile f -> IO ()
 shutdownStore sf = do
   logI $ "shutting down store"
 
-  hClose $ sfHandle sf
+--  hClose $ sfHandle sf
   hist <- atomically $ freezeHistogram (sfHistogram sf)
   encodeFile (sfFileName sf ++ "-histogram") hist
   
@@ -127,14 +130,13 @@ locOffsets sf loc = map (\i -> (fromIntegral i `rem` (fromIntegral count)) * (fr
     entrySize = sfEntrySize sf
 
 -- | Actually write data to the given offset and update stats.
-writeOffset :: StorePersistable f => StoreFile f -> Integer -> f -> IO ()
-writeOffset sf o df = do
+writeOffset :: StorePersistable f => StoreFile f -> Handle -> Integer -> f -> IO ()
+writeOffset sf handle o df = do
   hSeek handle AbsoluteSeek o
   BSL.hPut handle $ runPut doPut
   logI $ (show loc) ++ " written at " ++ show o
   atomically $ histInc (sfHistogram sf) $ nodeIdToDouble $ keyToNodeId loc
   where
-    handle = sfHandle sf
     loc = dataBlockLocation df
     doPut = putWord8 1 >> storePut df
     
@@ -148,7 +150,7 @@ putData sf df = Lock.with (sfLock sf) $ go [] (locOffsets sf loc) where
       -- we want to overwrite
       (o, loc') <- randomRIO (0, length olds - 1) >>= return . (olds !!)
       atomically $ histDec (sfHistogram sf) $ nodeIdToDouble $ keyToNodeId loc'
-      writeOffset sf o df
+      sfWriteOffset sf o df
     
   -- we still have some candidate slots which are possibly empty, check them
   go olds (o:os) = sfReadOffset sf o >>= \old -> case old of
@@ -156,8 +158,8 @@ putData sf df = Lock.with (sfLock sf) $ go [] (locOffsets sf loc) where
     Just df' -> let loc' = dataBlockLocation df' -- we're done if the data is already there
                 in unless (loc == loc') $ go ((o, loc'):olds) os
 
-readOffset :: StorePersistable f => StoreFile f -> Integer -> IO (Maybe f)
-readOffset sf offset = do
+readOffset :: StorePersistable f => StoreFile f -> Handle -> Integer -> IO (Maybe f)
+readOffset sf handle offset = do
   hSeek handle AbsoluteSeek offset
   d <- BSL.hGet handle $ sfEntrySize sf
   
@@ -166,34 +168,24 @@ readOffset sf offset = do
     Right (_, _, df) -> return $ Just df
     
   where
-    handle = sfHandle sf
     doGet = getWord8 >>= \flags -> case flags of
       1 -> storeGet
       _ -> fail "empty slot"
       
 getData :: StorePersistable f => StoreFile f -> Key -> IO (Maybe f)
-getData fs key = Lock.with (sfLock fs) $ doRead key >>= \result -> countRead result >> return result where
-  countRead r = atomically $ modifyTVar' (sfReads fs) (+1) >> case r of
-    Nothing -> return ()
-    Just _  -> modifyTVar' (sfReadSuccess fs) (+1)
-    
-  handle = sfHandle fs
+getData sf key = Lock.with (sfLock sf) $ doRead key >>= \result -> countRead result >> return result where
   
-  doGet = do
-    flags <- getWord8
-    if flags == 1
-      then storeGet
-      else fail "empty slot"
+  countRead r = atomically $ modifyTVar' (sfReads sf) (+1) >> case r of
+    Nothing -> return ()
+    Just _  -> modifyTVar' (sfReadSuccess sf) (+1)
 
-  doRead loc = go offsets where
-    offsets   = locOffsets fs loc
+  doRead loc = go (locOffsets sf loc) where
     go []     = return $ Nothing -- no offsets left, terminate
     go (o:os) = do
-      hSeek handle AbsoluteSeek o
-      d <- BSL.hGet handle $ sfEntrySize fs
-        
-      case runGetOrFail doGet d of
-        Left  (_, _, _ ) -> go os
-        Right (_, _, df) -> if loc == dataBlockLocation df
-                            then return $ Just df
-                            else go os
+      d <- sfReadOffset sf o
+      
+      case d of
+        Nothing -> go os
+        Just df -> if loc == dataBlockLocation df
+                   then return $ Just df
+                   else go os
