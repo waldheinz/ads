@@ -9,9 +9,7 @@ import Control.Applicative ( (<|>), (<$>) )
 import Control.Concurrent ( forkIO )
 import Control.Concurrent.STM
 import Control.Monad ( void )
-import Control.Monad.IO.Class ( liftIO )
 import Data.Aeson
-import qualified Data.Conduit.Utils as CU
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import Data.String ( fromString )
@@ -118,8 +116,8 @@ insertFile :: PeerAddress a => Node a -> WAI.Application
 insertFile node req = do
   case WAI.getRequestBodyType req of
     Nothing -> badRequest "must post url encoded or multipart data here" req
-    Just bt -> do
-      (params, files) <- WAI.parseRequestBody WAI.lbsBackEnd req
+    Just _ -> do
+      (_, files) <- WAI.parseRequestBody WAI.lbsBackEnd req
       uris <- mapM (\(_, fi) -> insert node InsertCHK (InsertDirect (WAI.fileContent fi) (decodeUtf8 $ WAI.fileContentType fi))) files
       badRequest (T.pack $ show uris) req
       

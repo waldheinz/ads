@@ -4,7 +4,7 @@
 module Freenet.Chk (
   -- * Working with CHKs
   ChkRequest(..), ChkBlock(..), mkChkBlock, decompressChk,
-  encryptChk, ChkInsert(..), chkBlockUri,
+  encryptChk, ChkInsert(..), chkBlockUri, chkDataSize,
 
   -- * CHK Headers
   ChkHeader, mkChkHeader, unChkHeader, chkHeaderHashId,
@@ -106,7 +106,7 @@ instance ToJSON ChkBlock where
 
 -- |
 -- Size of the CHK payload, which is 32kiB.
-chkDataSize :: Int
+chkDataSize :: Num a => a
 chkDataSize = 32768
 
 instance StorePersistable ChkBlock where

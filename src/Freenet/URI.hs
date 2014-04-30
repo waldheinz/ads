@@ -20,7 +20,7 @@ import Data.Binary.Get
 import Data.Binary.Put
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
-import Data.Text.Encoding ( decodeUtf8' )
+import Data.Text.Encoding ( decodeUtf8', encodeUtf8 )
 
 import Freenet.Base64
 import Freenet.Compression
@@ -80,9 +80,21 @@ getUTF8 = do
   case decodeUtf8' bs of
     Left e  -> fail $ "error in getUTF8: " ++ show e
     Right t -> return t
+
+putUTF8 :: T.Text -> Put
+putUTF8 txt
+  | len > (fromIntegral (maxBound :: Word32)) = error "putUTF8: string too long"
+  | otherwise = putWord16be (fromIntegral len) >> putByteString bs
+  where
+    len = BS.length bs
+    bs = encodeUtf8 txt
   
 instance Binary URI where
-  put _ = error "can't put URIs yet"
+  put (CHK rk ck ex ps) =
+    putWord8 1 >> put rk >> put ck >> put ex >> putWord32be (fromIntegral $ length ps) >> mapM_ putUTF8 ps
+    
+  put x = error $ "can't put " ++ show x
+  
   get = do
     t <- getWord8
     

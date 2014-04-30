@@ -4,6 +4,7 @@
 module Freenet.Metadata (
   -- * Metadata
   Metadata(..), parseMetadata,  ManifestEntries,
+  HashType(..),
 
   -- * Redirects
   RedirectTarget(..),
@@ -16,14 +17,16 @@ import Control.Applicative ( (<$>), (<*>) )
 import Control.Monad ( liftM2, replicateM, unless, void, when )
 import Data.Binary
 import Data.Binary.Get
+import Data.Binary.Put
 import Data.Bits
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as BSL
 import Data.Digest.Pure.SHA
+import Data.List ( foldl' )
 import Data.Maybe ( catMaybes )
 import qualified Data.Text as T
-import Data.Text.Encoding ( decodeUtf8' )
+import Data.Text.Encoding ( decodeUtf8', encodeUtf8 )
 
 import Freenet.Compression
 import Freenet.Mime
@@ -406,15 +409,18 @@ getSimpleRedirect' v flags isArchive = do
 
 data Version = V0 | V1 deriving ( Eq )
 
+magic :: Word64
+magic = 0xf053b2842d91482b
+
 instance Binary Metadata where
-  put _ = error "can't write Doctypes yet"
+  put = putMetadata
   
   get = do
-    magic <- getWord64be
+    magic' <- get
     version <- getWord16be
     doctype <- getWord8
 
-    if magic /= 0xf053b2842d91482b
+    if magic' /= magic
       then fail "missing magic"
       else case (version, doctype) of
         (0, 0) -> getSimpleRedirect V0
@@ -433,3 +439,67 @@ parseMetadata bs = case decodeOrFail bs of
   Left (_, off, e) -> Left $ T.concat [T.pack e, " at ", T.pack $ show off]
   Right(_, _, md)  -> Right md
                                                          
+-----------------------------------------------------------------------------------------------
+-- binary serialization
+-----------------------------------------------------------------------------------------------
+
+putMetadata :: Metadata -> Put
+putMetadata md = do
+  put magic
+  
+  case md of
+    Manifest mes          -> putManifest mes
+    SimpleRedirect hs tgt -> putSimpleRedirect hs tgt
+    x                     -> error $ "can't put " ++ show x 
+
+putSimpleRedirect :: [(HashType, BS.ByteString)] -> RedirectTarget -> Put
+putSimpleRedirect hs tgt = do
+  putWord16be 1 -- version 1
+  putWord8 0    -- doctype "SimpleRedirect"
+  putWord16be $ foldl' (.|.) 0 $ map flagBit $ [Hashes, FullKeys] 
+  putHashes hs
+  
+  case tgt of
+    RedirectKey (Just mime) uri -> putMime mime >> putUri uri
+    x                           -> error $ "putSimpleRedirect: can't put " ++ show x
+
+putUri :: URI -> Put
+putUri uri = putWord16be (fromIntegral len) >> putLazyByteString bs where
+  len = BSL.length bs
+  bs  = encode uri
+
+putMime :: T.Text -> Put
+putMime mime
+  | len > 255 = error "putMime: MIME type > 255 bytes"
+  | otherwise = putWord8 (fromIntegral len) >> putByteString bs
+  where
+    len = BS.length bs
+    bs  = encodeUtf8 mime
+
+putHashes :: [(HashType, BS.ByteString)] -> Put
+putHashes hs = do
+  putWord32be $ foldl' (.|.) 0 $ map (hashTypeFlag . fst) hs
+  mapM_ go [minBound..]
+  where
+    go ht = case lookup ht hs of
+      Just bs -> if hashTypeSize ht == BS.length bs
+                 then putByteString bs
+                 else error "putHashes: invalid hash size"
+      Nothing -> return ()
+
+putManifestEntry :: (T.Text, Metadata) -> Put
+putManifestEntry (name, md) = do
+  putWord16be nameLen >> putByteString nameBytes
+  putWord16be mdLen >> putLazyByteString mdBytes
+  where
+    mdLen     = fromIntegral $ BSL.length mdBytes
+    mdBytes   = encode md
+    nameLen   = fromIntegral $ BS.length nameBytes
+    nameBytes = encodeUtf8 name
+
+putManifest :: ManifestEntries -> Put
+putManifest mes = do
+  putWord16be 0 -- version 0
+  putWord8 2    -- doctype "SimpleManifest"
+  putWord32be (fromIntegral $ length mes)
+  mapM_ putManifestEntry mes
