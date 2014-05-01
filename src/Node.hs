@@ -156,7 +156,7 @@ handlePeerMessages node pn msg = do
 handleResponse :: Show a => Node a -> MessageId -> MessagePayload a -> STM String
 handleResponse node mid msg = do
   m <- readTVar (nodeActMsgs node)
-    
+  
   case HMap.lookup mid m of
     Nothing -> return "no active message with this id"
     Just am -> do
@@ -164,7 +164,7 @@ handleResponse node mid msg = do
         []      -> return (HMap.delete mid m, "no preds") -- if there are no preds, we can drop the AM
         (pn:[]) -> enqMessage pn (Response mid msg) >> return (HMap.delete mid m, "sent and dropped AM")
         (pn:ps) -> enqMessage pn (Response mid msg) >> return (HMap.insert mid (am { amPreds = ps }) m, "sent to " ++ show pn)
-
+      
       writeTVar (nodeActMsgs node) m' >> return logMsg
       
 -----------------------------------------------------------------------------------------------
@@ -172,8 +172,8 @@ handleResponse node mid msg = do
 -----------------------------------------------------------------------------------------------
 
 data ActiveMessage a = ActiveMessage
-                       { amStarted  :: Timestamp                 -- ^ when this message was sent off
-                       , amPreds    :: [PeerNode a]              -- ^ predecessors (peers who think we're close to the target)
+                       { amStarted :: Timestamp    -- ^ when this message was last routed
+                       , amPreds   :: [PeerNode a] -- ^ predecessors (peers who think we're close to the target)
                        }
 
 instance Show a => Show (ActiveMessage a) where
@@ -228,6 +228,9 @@ messagePopPred node mid = do
     Just (ActiveMessage _ (x:_)) -> return $ Just x
     _                            -> return Nothing
 
+-- |
+-- Generate JSON containing some information about the currently
+-- routed messages.
 nodeRouteStatus :: Node a -> IO Value
 nodeRouteStatus node = do
   now <- getTime
@@ -303,7 +306,7 @@ addPeerNode node pn = do
     else writeTVar (nodePeerNodes node) (pn : connected) >> return Nothing
 
 -- |
--- Removed a peer from the set of connected peers, when we decided
+-- Remove a peer from the set of connected peers. We decided
 -- we don't want to talk to this peer any more, or the connection
 -- was lost.
 removePeerNode :: Node a -> PeerNode a -> STM ()
