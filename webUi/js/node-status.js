@@ -1,6 +1,12 @@
 
 function appendStatus(container) {
     container.append($('<h1>').text('Status'));
+    
+    container.append($('<h2>').text('Peers'));
+    var peerStatus = $('<p>');
+    container.append(peerStatus);
+    appendPeerStatus(peerStatus);
+    
     container.append($('<h2>').text('Data Stores'));
     
     container.append($('<h3>').text('CHK Store'));
@@ -13,6 +19,25 @@ function appendStatus(container) {
     container.append(sskStatus);
     
     appendStoreStatus("api/status/store/ssk", sskStatus);
+}
+
+function appendPeerStatus(container) {
+    var list = $('<ul>').addClass('list-group');
+    container.append(list);
+    
+    $.getJSON("api/status/peers").then(function(json) {
+        var conn = json.connected;
+        
+        for (var i=0; i < conn.length; i++) {
+            var p = conn[i];
+            
+            var li = $('<li>').addClass('list-group-item');
+            list.append(li);
+            li.append($('<p>').text(p.peer.id));
+            li.append($('<p>').text(
+                    "connected since " + p.connectedFor.toFixed(1) + "s"));
+        }
+    });
 }
 
 function appendStoreStatus(url, container) {
