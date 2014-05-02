@@ -9,7 +9,29 @@ This is a (partial) reimplementation of [Freenet][1], written from scratch in Ha
   * The node to node communication is neither encrypted nor secured against any form of impersonation or whatever evil you may think of.
   * The FProxy implementation in no way filters the content it pulls from Freenet, and passes it straight to your browser. This means something as simple as an embedded image will reveal your identity to someone on the internet.
   * I have only limited understanding of cryptography. Maybe this is not exactly the problem here, because I just reimplemented what Freenet does. I can't judge on the crypto expertise of Freenet developers / designers, so you're on you own with this.
+  * This is very young code, and many things are still in flux and rough around the edges. If you're not a "developer" chances are you won't get it to run (or shoot yourself in the foot while trying).
 
+
+## Give it a try anyway
+
+Here's what needs to be done:
+
+  * Check out and compile the code, preferably in a cabal sandbox.
+  * Start it up for the first time with `cabal run`, and shut it down again when you see the `node listening on ...` message. This will initialize a `~/.ads` directory containing:
+    * A `config` file with some basic options in [configurator][configurator] format. You may want to adjust
+      * `node.listen`: where your node listens for node-to-node connections
+      * `node.http` : there is some rudimentary web interface / REST API, this allows you to tune where this listens
+      * `fproxy`: this is where the FProxy allows to browse Freesites. This is currently separate from `node.http` for ... reasons. It's likely to be merged with the former soon.
+      * `freenet.datastore`: the directory where the datastore lives, and how big you want it to be. Probably you want to change the defaults, here are some things to keep in mind:
+        * Currently it is not possible to grow/shrink the data store. When you decide you want to change it, all data will be lost. Don't be that guy.
+        * These files are created as sparse files by default. This means they won't take up space until data is actually written there, which is good. It also means that they'll likely be heavily fragmented when they have grown to a rasonable size, which is bad. If you can afford the space, just delete the freshly created files and recreate them with the `fallocate` command. This is quick and really makes a difference performance-wise. Also, COW file systems like ZFS and probably BTRFS tend to fragment these files as well. Good results can be obtained with the `ext4` + `fallocate` combo. If your store lives on an SSD you don't have to worry about fragmentation, only about the size.
+        * The `*histogram` files are re-created when lost, but this can take some time when the store is large.
+    * A `identity` file in JSON format, containing
+      * the `id` of your node, which is just 32 random bytes. It's not particulary important what that id is, but changing it after the first connection to the network might cause [severe problems][id-mismatch] finding nodes willing to talk to you. Just let it alone.
+      * an `addresses` list, defining where your node can be reached by other nodes. This list can be empty, which means your node will only ever make outgoing connections. If at all possible, you should put some adresses there, each in the following format: `{ "host" : "<IP address or hostname>", "port" : <port number> }`. The port number will likely be the same you used in `node.listen` in the `config` file, but may be different when using port forwardings. For the hostname, anything goes: plain IPv4 and IPv6 adresses, as well as DNS names. When other nodes try to connect to your node, they will try the adresses in the order you put them in this list. This is useful when your node can be reached over the Internet and over some LAN: Just put the local address before the Internet address, and other nodes on the same network will prefer the faster link; maybe a laptop talking to the desktop PC.
+    * You'll also need a `peers` file to make some connections: These are the peers your node will initally connect to, and then it will learn about other nodes from the nodes it has connected to, and so on. [Here][seed-nodes] is one to get you started.
+  * When all this works, you may point your FProxy to Enzo's index at `USK@XJZAi25dd5y7lrxE3cHMmM-xZ-c-hlPpKLYeLC0YG5I,8XTbR1bd9RBXlX6j-OZNednsJ8Cl6EAeBBebC3jtMFU,AQACAAE/index/336/`. (I do not know who Enzo is, and I don't endorse any of the content on his site. It's just an up-to-date index containing links to other Freesites you may or may not like. Which I may or may not like. Which may or may not be legal in your country.)
+  
 ## Features
 
   * TCP based protocol which allows data exchange between the nodes
@@ -47,3 +69,6 @@ This is far from optimal, and probably someone more familiar with the Freenet co
 [5]: https://wiki.freenetproject.org/Freesite
 [6]: http://arxiv.org/abs/1401.2165
 [7]: https://github.com/waldheinz/ads-companion
+[configurator]: http://hackage.haskell.org/package/configurator
+[id-mismatch]: https://github.com/waldheinz/ads/blob/master/src/Node.hs#L417
+[seed-nodes]: https://gist.github.com/waldheinz/317bfacd16eab84099f1
