@@ -11,7 +11,7 @@ module Freenet.Store (
 
 import qualified Control.Concurrent.Lock as Lock
 import Control.Concurrent.STM
-import Control.Monad ( replicateM, unless, void, when )
+import Control.Monad ( unless, void, when )
 import Data.Aeson
 import Data.Binary
 import Data.Binary.Get ( runGetOrFail )

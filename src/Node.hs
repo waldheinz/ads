@@ -606,14 +606,14 @@ waitDelayed :: Delayed d -> STM (Maybe d)
 waitDelayed (Delayed d) = readTMVar d
 
 data RequestManager r d = RequestManager
-                        { rmRequests :: TVar (HMap.HashMap FN.Key (Delayed d))
-                        , rmTimeout  :: Int
+                        { rmRequests :: ! (TVar (HMap.HashMap FN.Key (Delayed d)))
+                        , rmTimeout  :: ! Int
                         }
 
 mkRequestManager :: STM (RequestManager r d)
 mkRequestManager = do
   reqs <- newTVar HMap.empty
-  return $! RequestManager reqs (60 * 1000 * 1000)
+  return $! RequestManager reqs (30 * 1000 * 1000)
 
 offer :: (FN.DataBlock d) => d -> RequestManager r d -> STM ()
 offer db rmgr = do

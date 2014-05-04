@@ -30,8 +30,8 @@ class (FromJSON a, Show a, Eq a) => PeerAddress a where
 -- This is the live version of @NodeInfo@, which can be constructed
 -- from @NodeInfo@ and converted to @NodeInfo@ for storage and transfer.
 data Peer a = Peer
-            { peerId          :: NodeId       -- ^ the static node info of this peer
-            , peerAddresses   :: TVar [a]     -- ^ where this peer can be connected
+            { peerId          :: NodeId   -- ^ the static node info of this peer
+            , peerAddresses   :: TVar [a] -- ^ where this peer can be connected
             }
 
 instance Eq (Peer a) where
