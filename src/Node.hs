@@ -121,6 +121,7 @@ handlePeerMessages node _  (Direct (PeerList ps)) = do
 handlePeerMessages node pn msg = do
   let
     fn = nodeFreenet node
+    peer = pnPeer pn
     
     route = void $ forkIO $ case msg of
       Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
@@ -135,8 +136,15 @@ handlePeerMessages node pn msg = do
           Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetSskBlock blk
           
-      Routed True rm    -> sendRoutedMessage node rm Nothing -- backtrack
-      Response mid msg' -> (atomically $ handleResponse node mid msg') >>=
+      Routed True rm    -> do
+        -- the message was backtracked to us
+        case rmPayload rm of
+          (FreenetChkRequest req) -> atomically $ peerFetchDone peer (FN.dataRequestLocation req) False
+          _                       -> return ()
+          
+        sendRoutedMessage node rm Nothing
+        
+      Response mid msg' -> (atomically $ handleResponse node peer mid msg') >>=
                             \lm -> logD $ "routed " ++ show mid ++ ": " ++ show lm
 
       _ -> return ()
@@ -153,15 +161,21 @@ handlePeerMessages node pn msg = do
     
   writeStores >> route
 
-handleResponse :: Show a => Node a -> MessageId -> MessagePayload a -> STM String
-handleResponse node mid msg = do
+handleResponse :: Show a => Node a -> Peer a -> MessageId -> MessagePayload a -> STM String
+handleResponse node peer mid msg = do
   m <- readTVar (nodeActMsgs node)
   
   case HMap.lookup mid m of
     Nothing -> return "no active message with this id"
     Just am -> do
       (m', logMsg) <- case amPreds am of
-        []      -> return (HMap.delete mid m, "no preds") -- if there are no preds, we can drop the AM
+        []      -> do
+          -- this is the last time we see this AM, we can update the stats and drop it
+          case msg of
+            FreenetChkBlock blk -> peerFetchDone peer (FN.dataBlockLocation blk) True
+            _                   -> return ()
+            
+          return (HMap.delete mid m, "no preds")
         (pn:[]) -> enqMessage pn (Response mid msg) >> return (HMap.delete mid m, "sent and dropped AM")
         (pn:ps) -> enqMessage pn (Response mid msg) >> return (HMap.insert mid (am { amPreds = ps }) m, "sent to " ++ show pn)
       
@@ -172,12 +186,13 @@ handleResponse node mid msg = do
 -----------------------------------------------------------------------------------------------
 
 data ActiveMessage a = ActiveMessage
-                       { amStarted :: Timestamp    -- ^ when this message was last routed
-                       , amPreds   :: [PeerNode a] -- ^ predecessors (peers who think we're close to the target)
+                       { amStarted :: ! Timestamp          -- ^ when this message was last routed
+                       , amPreds   :: ! [PeerNode a]       -- ^ predecessors (peers who think we're close to the target)
+                       , amPayload :: ! (MessagePayload a) -- ^ payload of that message
                        }
 
 instance Show a => Show (ActiveMessage a) where
-  show (ActiveMessage s ps) = "ActiveMessage {amStarted=" ++ show s ++ ", amPreds=" ++ show ps ++ "}"
+  show (ActiveMessage s ps _) = "ActiveMessage {amStarted=" ++ show s ++ ", amPreds=" ++ show ps ++ "}"
 
 mkRoutedMessage :: PeerAddress a => Node a -> NodeId -> MessagePayload a -> IO ()
 mkRoutedMessage node target msg = do
@@ -192,7 +207,7 @@ sendRoutedMessage node msg prev = do
     -- create an ActiveMessage or update the message's timestamp
     let
       mid = rmId msg
-      go Nothing   = ActiveMessage now []
+      go Nothing   = ActiveMessage now [] (rmPayload msg)
       go (Just am) = am { amStarted = now }
       in modifyTVar' (nodeActMsgs node) $ \m -> HMap.insert mid (go $ HMap.lookup mid m) m
   
@@ -200,7 +215,7 @@ sendRoutedMessage node msg prev = do
     NBO.route (nodeNbo node) prev msg >>= \nextStep -> case nextStep of
       NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
       NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
-      NBO.Fail                -> handleResponse node (rmId msg) (Failed $ Just "routing failed")
+      NBO.Fail                -> return "routing failed" -- handleResponse node (rmId msg) (Failed $ Just "routing failed")
   
   logD $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
 
@@ -220,13 +235,13 @@ messagePopPred node mid = do
     tgt = HMap.lookup mid m
     
   writeTVar amMap $ case tgt of
-      Just (ActiveMessage _ (_:[])) -> HMap.delete mid m -- remote messages without any more preds can be dropped
-      Just (ActiveMessage s (_:xs)) -> HMap.insert mid (ActiveMessage s xs) m -- messages with more preds just get a pred removed
-      _                             -> m
+      Just (ActiveMessage _ (_:[]) _) -> HMap.delete mid m -- remote messages without any more preds can be dropped
+      Just (ActiveMessage s (_:xs) p) -> HMap.insert mid (ActiveMessage s xs p) m -- messages with more preds just get a pred removed
+      _                               -> m
   
   case tgt of
-    Just (ActiveMessage _ (x:_)) -> return $ Just x
-    _                            -> return Nothing
+    Just (ActiveMessage _ (x:_) _) -> return $ Just x
+    _                              -> return Nothing
 
 -- |
 -- Generate JSON containing some information about the currently
@@ -282,7 +297,7 @@ mergeNodeInfo node ni = unless (nodeId ni == (nodeId . nodeIdentity) node) $ do
   p   <- mkPeer ni
 
   let
-    merge (Peer _ av1) (Peer _ av2) = do
+    merge (Peer _ av1 _) (Peer _ av2 _) = do
       as2 <- readTVar av2
       modifyTVar' av1 $ \as1 -> nub (as1 ++ as2)
   

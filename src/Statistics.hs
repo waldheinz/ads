@@ -71,8 +71,8 @@ teIndices est loc = getBounds (estPoints est) >>= \(_, maxIdx) -> go maxIdx 0
       | n == mi = return (mi, 0) -- wrap around
       | otherwise = do
         (x, _) <- readArray (estPoints est) n
-        if x < loc
-          then return (n, n + 1)
+        if x > loc
+          then return $ if n > 0 then (n - 1, n) else (mi, 0)
           else go mi $ n + 1
   
 -----------------------------------------------------------------------

@@ -36,8 +36,50 @@ function appendPeerStatus(container) {
             li.append($('<p>').text(p.peer.id));
             li.append($('<p>').text(
                     "connected since " + p.connectedFor.toFixed(1) + "s"));
+            li.append(showEstimator(p.peer.psuccess));
         }
     });
+}
+
+function showEstimator(data) {
+    var width = 128;
+    var height = 128;
+    var cx = width / 2;
+    var cy = height / 2;
+    
+    var result = document.createElementNS(d3.ns.prefix.svg, 'svg');
+    var svg = d3.select(result);
+    
+    svg
+            .attr("width", width)
+            .attr("height", height)
+            .attr("class", "estimator");
+    
+    
+    for (var i=0; i < 5; i++) {
+        svg.append("circle")
+                .attr("cx", cx)
+                .attr("cy", cy)
+                .attr("r", (i+1) / 10 * width);
+    }
+    
+    
+    var points = "";
+    
+    for (var i=0; i < data.length; i++) {
+        var pt = data[i][1];
+        var r = 64 * pt[1];
+        var px = cx + r * Math.cos(2 * Math.PI * pt[0]);
+        var py = cy + r * Math.sin(2 * Math.PI * pt[0]);
+        
+        points += " " + px + "," + py;
+    }
+    
+    svg.append("svg:polygon")
+            .attr("points", points);
+    
+    return result;
+    
 }
 
 function appendStoreStatus(url, container) {

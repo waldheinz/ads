@@ -13,3 +13,13 @@
   stroke: #000;
   shape-rendering: crispEdges;
 }
+
+.estimator circle {
+    fill: none;
+    stroke: #449;
+}
+
+.estimator polygon {
+    fill: #77f;
+    opacity: 0.5;
+}
