@@ -3,8 +3,11 @@
 
 module Types (
   NodeId, mkNodeId', randomNodeId, keyToNodeId,
-  nodeIdToDouble,
   NodeInfo(..),
+
+  -- * Locations
+  HasLocation(..), Location, toLocation,
+  LocDistance, locDist,
   
   -- * state aware serialization
   ToStateJSON(..),
@@ -30,7 +33,6 @@ import System.Random ( RandomGen, random )
 
 import qualified Freenet.URI as FN
 import qualified Freenet.Types as FN
-import qualified NextBestOnce as NBO
 
 ----------------------------------------------------------------------
 -- STM aware serialization
@@ -56,7 +58,8 @@ instance Binary NodeId where
   get = NodeId <$> getByteString 32
   
 instance Show NodeId where
-  show nid = BSC.unpack (HEX.encode $ unNodeId nid) ++ " (" ++ show (nodeIdToDouble nid) ++ ")"
+  show nid = BSC.unpack (HEX.encode $ unNodeId nid)
+--             ++ " (" ++ show (nodeIdToDouble nid) ++ ")"
 
 instance FromJSON NodeId where
   parseJSON (String s) = pure $ NodeId $ fst (HEX.decode $ encodeUtf8 s)
@@ -71,24 +74,42 @@ nodeIdToInteger (NodeId bs) = BS.foldl' (\i bb -> (i `shiftL` 8) + fromIntegral 
 maxNodeId :: Integer
 maxNodeId = (256 ^ (32 :: Integer)) - 1
 
-nodeIdToDouble :: NodeId -> Double
-nodeIdToDouble nid = fromRational $ (nodeIdToInteger nid) % maxNodeId
-
-instance NBO.Location NodeId where
-  toDouble l = nodeIdToDouble l
-
 mkNodeId' :: BS.ByteString -> NodeId
 mkNodeId' bs
   | BS.length bs /= 32 = error "mkNodeId': expected 32 bytes"
   | otherwise = NodeId bs
 
+randomNodeId :: RandomGen g => g -> (NodeId, g)
+randomNodeId g = let (bs, Just g') = BS.unfoldrN 32 (Just . random) g in (mkNodeId' bs, g')
+
+-------------------------------------------------------------------------------------------
+-- Locations
+-------------------------------------------------------------------------------------------
+
+class HasLocation a where
+  hasLocToInteger :: a -> Integer
+  hasLocMax       :: a
+
+newtype Location = Location { unLocation :: Rational } deriving ( Eq )
+
+toLocation :: HasLocation a => a -> Location
+toLocation x = Location $ (hasLocToInteger x) % (hasLocToInteger $ hasLocMax `asTypeOf` x)
+
+newtype LocDistance = LocDistance { unDistance :: Rational } deriving ( Eq, Ord )
+
+locDist :: Location -> Location -> LocDistance
+locDist l1 l2
+  | l1' < l2' = LocDistance $ let d = l2' - l1' in if d > (1 % 2) then d - 1 else d
+  | otherwise = LocDistance $ let d = l1' - l2' in if d > (1 % 2) then 1 - d else (-d)
+  where
+    (l1', l2') = (unLocation l1, unLocation l2)
+
+
+
 -- |
 -- Turn a Freenet @Key@ into a @NodeId@ by repacking the 32 bytes.
 keyToNodeId :: FN.Key -> NodeId
 keyToNodeId key = mkNodeId' $ FN.unKey key
-
-randomNodeId :: RandomGen g => g -> (NodeId, g)
-randomNodeId g = let (bs, Just g') = BS.unfoldrN 32 (Just . random) g in (mkNodeId' bs, g')
 
 ----------------------------------------------------------------------
 -- Node Info

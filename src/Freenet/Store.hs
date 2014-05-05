@@ -120,7 +120,7 @@ scanStore sf = do mapM_ checkOffset offsets
       
       case r of
         Nothing -> return ()
-        Just df -> atomically $ histInc (sfHistogram sf) $ nodeIdToDouble $ keyToNodeId $ dataBlockLocation df
+        Just df -> atomically $ histInc (sfHistogram sf) $ toLocation $ dataBlockLocation df
 
 locOffsets :: StoreFile f -> Key -> [Integer]
 locOffsets sf loc = map (\i -> (fromIntegral i `rem` (fromIntegral count)) * (fromIntegral entrySize)) [idx .. idx + 5]

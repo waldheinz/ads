@@ -64,7 +64,7 @@ peerFetchDone
   -> Key     -- ^ the key that was fetched
   -> Bool    -- ^ if the fetch was successful
   -> STM ()
-peerFetchDone peer loc suc = updateTEstimator (peerSuccessEst peer) (nodeIdToDouble $ keyToNodeId loc) suc'
+peerFetchDone peer key suc = updateTEstimator (peerSuccessEst peer) (toLocation key) suc'
   where
     suc' = if suc then 1 else 0
     

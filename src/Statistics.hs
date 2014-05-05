@@ -26,7 +26,7 @@ import Types
 -----------------------------------------------------------------------
 
 data TEstimator = TEstimator
-                  { estPoints :: ! (TArray Int (Double, Double))
+                  { estPoints :: ! (TArray Int (Location, Double))
                   , estFactor :: ! Double
                   }
 
@@ -46,7 +46,7 @@ mkTEstimator cnt f v = do
 
 updateTEstimator
   :: TEstimator
-  -> Double     -- ^ where to update the estimator, must be in [0..1]
+  -> Location   -- ^ where to update the estimator, must be in [0..1]
   -> Double     -- ^ new value
   -> STM ()
 updateTEstimator est loc val = do
@@ -64,15 +64,17 @@ updateTEstimator est loc val = do
 
 -- |
 -- Finds the (left, right) index pair for the given location.
-teIndices :: TEstimator -> Double -> STM (Int, Int)
+teIndices :: TEstimator -> Location -> STM (Int, Int)
 teIndices est loc = getBounds (estPoints est) >>= \(_, maxIdx) -> go maxIdx 0
   where
     go mi n
       | n == mi = return (mi, 0) -- wrap around
       | otherwise = do
-        (x, _) <- readArray (estPoints est) n
-        if x > loc
-          then return $ if n > 0 then (n - 1, n) else (mi, 0)
+        (x1, _) <- readArray (estPoints est) n
+        (x2, _) <- readArray (estPoints est) $ n + 1
+        
+        if (x1 `locDist` loc) < (x1 `locDist` x2)
+          then return (n, n + 1)
           else go mi $ n + 1
   
 -----------------------------------------------------------------------
