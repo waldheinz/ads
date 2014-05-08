@@ -18,6 +18,7 @@ import Data.Aeson
 import Data.Binary
 import qualified Data.Array.IArray as IA
 import Data.Array.MArray
+import Data.Ratio
 
 import Types
 
@@ -41,7 +42,7 @@ mkTEstimator
   -> Double -- ^ initial value for each data point
   -> STM TEstimator
 mkTEstimator cnt f v = do
-  arr <- newListArray (0, cnt - 1) [(fromIntegral x / fromIntegral cnt, v) | x <- [0..(cnt-1)]]
+  arr <- newListArray (0, cnt - 1) [(mkLocation $ x % cnt, v) | x <- [0..(cnt-1)]]
   return $ TEstimator arr f
 
 updateTEstimator
@@ -51,12 +52,14 @@ updateTEstimator
   -> STM ()
 updateTEstimator est loc val = do
   (l,  r ) <- teIndices est loc
-  
+  let
+    f' = toRational f
+      
   readArray arr l >>= \(x0, y0) ->
-    writeArray arr l (x0 + (loc - x0) * f, y0 + (val - y0) * f)
+    writeArray arr l (x0 `locMove` ((loc `locDist` x0) `scaleDist` f'), y0 + (val - y0) * f)
     
   readArray arr r >>= \(x1, y1) ->
-    writeArray arr r (x1 + (x1 - loc) * f, y1 + (val - y1) * f)
+    writeArray arr r (x1 `locMove` ((x1 `locDist` loc) `scaleDist` f'), y1 + (val - y1) * f)
     
   where
     arr = estPoints est
@@ -73,7 +76,7 @@ teIndices est loc = getBounds (estPoints est) >>= \(_, maxIdx) -> go maxIdx 0
         (x1, _) <- readArray (estPoints est) n
         (x2, _) <- readArray (estPoints est) $ n + 1
         
-        if (x1 `locDist` loc) < (x1 `locDist` x2)
+        if  (x2 `rightOf` loc) && (loc `rightOf` x1)
           then return (n, n + 1)
           else go mi $ n + 1
   
@@ -99,18 +102,19 @@ mkTHistogram bins = THistogram <$> newArray (0, bins - 1) 0
 
 -- |
 -- Increment the histogram by 1 at the given location.
-histInc :: THistogram -> Double -> STM ()
+histInc :: HasLocation l => THistogram -> l -> STM ()
 histInc = histMod (\x -> x + 1)
 
-histDec :: THistogram -> Double -> STM ()
+histDec :: HasLocation l => THistogram -> l -> STM ()
 histDec = histMod (\x -> x - 1)
 
-histMod :: (Word64 -> Word64) -> THistogram -> Double -> STM ()
+histMod :: HasLocation l => (Word64 -> Word64) -> THistogram -> l -> STM ()
 histMod f h l = do
   (minBin, maxBin) <- getBounds a
   
   let
-    idx = max minBin $ min maxBin $ minBin + (floor $ l * (fromIntegral maxBin + 1))
+    l' = unLocation . toLocation $ l
+    idx = max minBin $ min maxBin $ minBin + (floor $ l' * (fromIntegral maxBin + 1))
     
   readArray a idx >>= \v -> writeArray a idx $! f v -- this should be strict
   where

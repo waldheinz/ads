@@ -22,7 +22,6 @@ import System.Random ( newStdGen, randomR )
 import Freenet.Compression
 import Freenet.Mime
 import Freenet.URI
-import Types
 
 data SplitFileSegment
   = SplitFileSegment

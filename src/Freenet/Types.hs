@@ -25,6 +25,7 @@ import Data.Hashable
 import qualified Data.Text as T
 
 import Freenet.Base64
+import Types
 import Utils
 
 newtype Key = Key { unKey :: BS.ByteString } deriving ( Eq, Ord )
@@ -37,6 +38,9 @@ instance Show Key where
 
 instance Hashable Key where
   hashWithSalt s k = hashWithSalt s (unKey k)
+
+instance HasLocation Key where
+  
 
 instance Binary Key where
   put (Key k) = putByteString k

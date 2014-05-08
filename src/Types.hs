@@ -2,17 +2,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Types (
-  NodeId, mkNodeId', randomNodeId, keyToNodeId,
+  NodeId, mkNodeId', randomNodeId,
   NodeInfo(..),
 
   -- * Locations
-  HasLocation(..), Location, toLocation,
-  LocDistance, locDist,
+  HasLocation(..), Location, mkLocation, toLocation,
+  unLocation, rightOf,
+  LocDistance, locDist, absLocDist, scaleDist, locMove,
   
   -- * state aware serialization
   ToStateJSON(..),
-  
-  UriFetch(..)
   ) where
 
 import Control.Applicative ( pure, (<$>), (<*>) )
@@ -27,12 +26,8 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as HEX
 import qualified Data.ByteString.Char8 as BSC
 import Data.Ratio ( (%) )
-import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
 import System.Random ( RandomGen, random )
-
-import qualified Freenet.URI as FN
-import qualified Freenet.Types as FN
 
 ----------------------------------------------------------------------
 -- STM aware serialization
@@ -68,11 +63,12 @@ instance FromJSON NodeId where
 instance ToJSON NodeId where
   toJSON (NodeId bs) = toJSON $ decodeUtf8 $ HEX.encode bs
 
+instance HasLocation NodeId where
+  hasLocToInteger = nodeIdToInteger
+  hasLocMax       = NodeId $ BS.replicate 32 255
+
 nodeIdToInteger :: NodeId -> Integer
 nodeIdToInteger (NodeId bs) = BS.foldl' (\i bb -> (i `shiftL` 8) + fromIntegral bb) 0 bs
-
-maxNodeId :: Integer
-maxNodeId = (256 ^ (32 :: Integer)) - 1
 
 mkNodeId' :: BS.ByteString -> NodeId
 mkNodeId' bs
@@ -90,26 +86,56 @@ class HasLocation a where
   hasLocToInteger :: a -> Integer
   hasLocMax       :: a
 
-newtype Location = Location { unLocation :: Rational } deriving ( Eq )
+newtype Location = Location { unLocation :: Rational } deriving ( Eq, Show )
+
+instance ToJSON Location where
+  toJSON (Location l) = toJSON $ (fromRational l :: Double)
+
+mkLocation :: Real a => a -> Location
+mkLocation l
+  | l < 0 || l >= 1 = error "mkLocation: location must be in [0..1)"
+  | otherwise = Location $ toRational l
+
+-- |
+-- Determines if the shortes path on the circle goes to the right.
+rightOf :: Location -> Location -> Bool
+rightOf (Location l1) (Location l2)
+  | l1 < l2   = l2 - l1 > (1 % 2) 
+  | otherwise = l1 - l2 < (1 % 2)
 
 toLocation :: HasLocation a => a -> Location
-toLocation x = Location $ (hasLocToInteger x) % (hasLocToInteger $ hasLocMax `asTypeOf` x)
+toLocation x = Location $ (hasLocToInteger x) % (1 + (hasLocToInteger $ hasLocMax `asTypeOf` x))
 
-newtype LocDistance = LocDistance { unDistance :: Rational } deriving ( Eq, Ord )
+locMove :: Location -> LocDistance -> Location
+locMove (Location l) (LocDistance d)
+  | l' >= 1   = Location $ 1 - l'
+  | l' < 0    = Location $ l' + 1
+  | otherwise = Location l'
+  where
+    l' = l + d
+
+-- |
+-- Distance between two locations, always in [-0.5, 0.5].
+newtype LocDistance = LocDistance { _unDistance :: Rational } deriving ( Eq, Ord, Show )
+
+absLocDist :: Location -> Location -> LocDistance
+absLocDist (Location l1) (Location l2) = LocDistance $ (min d (1 - d)) where
+  d = if l1 > l2 then l1 - l2 else l2 - l1
 
 locDist :: Location -> Location -> LocDistance
-locDist l1 l2
-  | l1' < l2' = LocDistance $ let d = l2' - l1' in if d > (1 % 2) then d - 1 else d
-  | otherwise = LocDistance $ let d = l1' - l2' in if d > (1 % 2) then 1 - d else (-d)
-  where
-    (l1', l2') = (unLocation l1, unLocation l2)
+locDist ll1@(Location l1) ll2@(Location l2) = LocDistance $ f * (min d (1 - d)) where
+  d = if l1 > l2 then l1 - l2 else l2 - l1
+  f = if ll1 `rightOf` ll2 then 1 else (-1)
 
-
+scaleDist :: LocDistance -> Rational -> LocDistance
+scaleDist (LocDistance d) f
+  | f > 1     = error "scaleDist: factor > 1"
+  | otherwise = LocDistance $ d * f
 
 -- |
 -- Turn a Freenet @Key@ into a @NodeId@ by repacking the 32 bytes.
-keyToNodeId :: FN.Key -> NodeId
-keyToNodeId key = mkNodeId' $ FN.unKey key
+--keyToNodeId :: FN.Key -> NodeId
+--keyToNodeId key = mkNodeId' $ FN.unKey key
 
 ----------------------------------------------------------------------
 -- Node Info
@@ -137,12 +163,3 @@ instance ToJSON a => ToJSON (NodeInfo a) where
               [ "id"        .= nodeId ni
               , "addresses" .= nodeAddresses ni
               ]
-
------------------------------------------------------------------
--- inserting / fetching data
------------------------------------------------------------------
-
-class UriFetch a where
-  getUriData :: a -> FN.URI -> IO (Either T.Text (BS.ByteString, Int))
-
-  

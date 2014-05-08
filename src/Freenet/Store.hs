@@ -120,7 +120,7 @@ scanStore sf = do mapM_ checkOffset offsets
       
       case r of
         Nothing -> return ()
-        Just df -> atomically $ histInc (sfHistogram sf) $ toLocation $ dataBlockLocation df
+        Just df -> atomically $ histInc (sfHistogram sf) $ dataBlockLocation df
 
 locOffsets :: StoreFile f -> Key -> [Integer]
 locOffsets sf loc = map (\i -> (fromIntegral i `rem` (fromIntegral count)) * (fromIntegral entrySize)) [idx .. idx + 5]
@@ -135,7 +135,7 @@ writeOffset sf handle o df = do
   hSeek handle AbsoluteSeek o
   BSL.hPut handle $ runPut doPut
   logI $ (show loc) ++ " written at " ++ show o
-  atomically $ histInc (sfHistogram sf) $ nodeIdToDouble $ keyToNodeId loc
+  atomically $ histInc (sfHistogram sf) loc
   where
     loc = dataBlockLocation df
     doPut = putWord8 1 >> storePut df
@@ -149,7 +149,7 @@ putData sf df = Lock.with (sfLock sf) $ go [] (locOffsets sf loc) where
     unless (p > 0.1) $ do -- TODO: use something clever instead of 0.1, maybe try to match the incoming req. distribution?
       -- we want to overwrite
       (o, loc') <- randomRIO (0, length olds - 1) >>= return . (olds !!)
-      atomically $ histDec (sfHistogram sf) $ nodeIdToDouble $ keyToNodeId loc'
+      atomically $ histDec (sfHistogram sf) loc'
       sfWriteOffset sf o df
     
   -- we still have some candidate slots which are possibly empty, check them

@@ -528,7 +528,7 @@ nodeFetchChk node req k = do
     Right blk -> k $ Right blk
     Left  _   -> do
       d <- request (nodeChkRequests node) req $ \r -> do
-        mkRoutedMessage node (keyToNodeId $ FN.dataRequestLocation req) (FreenetChkRequest r)
+        mkRoutedMessage node (FN.dataRequestLocation req) (FreenetChkRequest r)
 
       result <- atomically $ waitDelayed d
       
@@ -544,7 +544,7 @@ nodeFetchSsk node req k = do
     Right blk -> k $ Right blk
     Left  _   -> do
       d <- request (nodeSskRequests node) req $ \r -> do
-        mkRoutedMessage node (keyToNodeId $ FN.dataRequestLocation req) (FreenetSskRequest r)
+        mkRoutedMessage node (FN.dataRequestLocation req) (FreenetSskRequest r)
 
       result <- atomically $ waitDelayed d
       
@@ -552,7 +552,7 @@ nodeFetchSsk node req k = do
         Nothing  -> k $ Left "timeout waiting for SSK data"
         Just blk -> k $ Right blk
                     
-instance PeerAddress a => UriFetch (Node a) where
+instance PeerAddress a => FN.UriFetch (Node a) where
   getUriData = requestNodeData
 
 instance PeerAddress a => FN.ChkInsert (Node a) where
@@ -581,7 +581,7 @@ requestNodeData n (FN.SSK pkh key extra dn _) = do
     Right blk -> return $ decrypt blk -- (BSL.take (fromIntegral bl) $ BSL.fromStrict blk)
     Left _    -> do
       d <- request (nodeSskRequests n) req $ \r -> do
-        mkRoutedMessage n (keyToNodeId $ FN.dataRequestLocation req) (FreenetSskRequest r)
+        mkRoutedMessage n (FN.dataRequestLocation req) (FreenetSskRequest r)
           
       result <- atomically $ waitDelayed d
           
@@ -602,7 +602,7 @@ requestNodeData n (FN.USK pkh key extra dn dr _) = do
     Left _    -> do
       d <- request (nodeSskRequests n) req $ \r -> do
         mkRoutedMessage n
-          (keyToNodeId $ FN.dataRequestLocation req)
+          (FN.dataRequestLocation req)
           (FreenetSskRequest r)
           
       result <- atomically $ waitDelayed d

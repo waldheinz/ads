@@ -21,7 +21,7 @@ import System.Log.Logger
 
 import Freenet.Metadata
 import Freenet.SplitFile
-import Types
+import Freenet.URI
 import Utils
 
 -- |
