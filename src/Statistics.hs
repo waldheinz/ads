@@ -52,18 +52,17 @@ updateTEstimator
   -> STM ()
 updateTEstimator est loc val = do
   (l,  r ) <- teIndices est loc
+  
   let
-    f' = toRational f
-      
+    f'  = toRational f
+    arr = estPoints est
+    f   = estFactor est
+
   readArray arr l >>= \(x0, y0) ->
     writeArray arr l (x0 `locMove` ((loc `locDist` x0) `scaleDist` f'), y0 + (val - y0) * f)
     
   readArray arr r >>= \(x1, y1) ->
     writeArray arr r (x1 `locMove` ((x1 `locDist` loc) `scaleDist` f'), y1 + (val - y1) * f)
-    
-  where
-    arr = estPoints est
-    f   = estFactor est
 
 -- |
 -- Finds the (left, right) index pair for the given location.

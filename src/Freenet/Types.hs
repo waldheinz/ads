@@ -15,8 +15,6 @@ import Control.Applicative ( (<$>), pure )
 import Control.Monad ( mzero )
 import qualified Data.Aeson as JSON
 import Data.Binary
---import Data.Binary.Put
---import Data.Binary.Get
 import Data.Bits ( shiftL, testBit, xor )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
@@ -72,8 +70,6 @@ mkKey bs = if BS.length bs == keySize
 
 mkKey' :: BS.ByteString -> Key
 mkKey' bs = Key $ mkId' bs
---  | BS.length bs == keySize = Key $ mkbs
---  | otherwise               = error "expected 32 bytes in mkKey"
 
 -----------------------------------------------------------------------------------------
 -- data blocks, requests and routing them

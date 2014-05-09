@@ -35,12 +35,12 @@ import Types
 data StoreFile f = StoreFile
                      { sfLock        :: ! Lock.Lock -- ^ for accessing the handle
                      , sfFileName    :: ! FilePath
---                     , sfHandles     :: ! (TVar [Handle])
                      , sfEntrySize   :: ! Int
                      , sfEntryCount  :: ! Int
                      , sfReads       :: ! (TVar Word64) -- ^ total number of reads
                      , sfReadSuccess :: ! (TVar Word64) -- ^ number of successful reads
                      , sfHistogram   :: ! THistogram
+                     , sfHandle      :: ! Handle
                      , sfReadOffset  :: ! (Integer -> IO (Maybe f)) -- ^ try to read data from the given offset
                      , sfWriteOffset :: ! (Integer -> f -> IO ())   -- ^ actually write data to the given offset
                      }
@@ -75,10 +75,9 @@ mkStoreFile sp fileName count = do
   rds  <- newTVarIO 0
   scs  <- newTVarIO 0
   lck  <- Lock.new
- -- hnds <- newTVarIO handles
   (needScan, hist) <- readStats fileName
   
-  let sf = StoreFile lck fileName entrySize count rds scs hist
+  let sf = StoreFile lck fileName entrySize count rds scs hist handle
            (readOffset sf handle) (writeOffset sf handle)
            
   when needScan $ void $ scanStore sf
@@ -104,7 +103,7 @@ shutdownStore :: StoreFile f -> IO ()
 shutdownStore sf = do
   logI $ "shutting down store"
 
---  hClose $ sfHandle sf
+  hClose $ sfHandle sf
   hist <- atomically $ freezeHistogram (sfHistogram sf)
   encodeFile (sfFileName sf ++ "-histogram") hist
   

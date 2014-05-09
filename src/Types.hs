@@ -90,10 +90,6 @@ class HasLocation a where
   hasLocToInteger :: a -> Integer
   hasLocMax       :: a
 
---instance HasId a => HasLocation a where
---  hasLocToInteger x = hasLocToInteger $ getId x
---  hasLocMax = hasLocMax . getId
-
 newtype Location = Location { unLocation :: Rational } deriving ( Eq, Show )
 
 instance ToJSON Location where
@@ -139,11 +135,6 @@ scaleDist :: LocDistance -> Rational -> LocDistance
 scaleDist (LocDistance d) f
   | f > 1     = error "scaleDist: factor > 1"
   | otherwise = LocDistance $ d * f
-
--- |
--- Turn a Freenet @Key@ into a @NodeId@ by repacking the 32 bytes.
---keyToNodeId :: FN.Key -> NodeId
---keyToNodeId key = mkNodeId' $ FN.unKey key
 
 ----------------------------------------------------------------------
 -- Node Info
