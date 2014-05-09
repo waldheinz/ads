@@ -215,7 +215,12 @@ sendRoutedMessage node msg prev = do
     NBO.route (nodeNbo node) prev msg >>= \nextStep -> case nextStep of
       NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
       NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
-      NBO.Fail                -> return "routing failed" -- handleResponse node (rmId msg) (Failed $ Just "routing failed")
+      NBO.Fail                -> case prev of
+        Nothing -> do
+          modifyTVar' (nodeActMsgs node) $ HMap.delete (rmId msg)
+          return "routing failed"
+            
+        Just pn -> handleResponse node (pnPeer pn) (rmId msg) (Failed $ Just "routing failed")
   
   logD $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
 

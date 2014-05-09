@@ -47,7 +47,7 @@ mkTEstimator cnt f v = do
 
 updateTEstimator
   :: TEstimator
-  -> Location   -- ^ where to update the estimator, must be in [0..1]
+  -> Location   -- ^ where to update the estimator
   -> Double     -- ^ new value
   -> STM ()
 updateTEstimator est loc val = do
@@ -119,10 +119,6 @@ histMod f h l = do
   readArray a idx >>= \v -> writeArray a idx $! f v -- this should be strict
   where
     a = histVals h
-
-----------------------------------------------------------------------------------------
--- Histograms
-----------------------------------------------------------------------------------------
 
 newtype Histogram = Histogram { unHistogram :: IA.Array Int Word64 }
 
