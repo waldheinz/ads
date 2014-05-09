@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Types (
-  NodeId, mkNodeId', randomNodeId,
+  Id, unId, mkId', randomId, HasId(..),
   NodeInfo(..),
 
   -- * Locations
@@ -46,37 +46,41 @@ instance ToStateJSON a => ToStateJSON (TVar a) where
 -- Node IDs
 ----------------------------------------------------------------------
 
-newtype NodeId = NodeId { unNodeId :: BS.ByteString } deriving ( Eq )
+-- |
+-- An 256 bit identifier.
+newtype Id = Id { unId :: BS.ByteString } deriving ( Eq, Ord )
 
-instance Binary NodeId where
-  put = putByteString . unNodeId
-  get = NodeId <$> getByteString 32
+class HasId a where
+  getId :: a -> Id
+
+instance Binary Id where
+  put = putByteString . unId
+  get = Id <$> getByteString 32
   
-instance Show NodeId where
-  show nid = BSC.unpack (HEX.encode $ unNodeId nid)
---             ++ " (" ++ show (nodeIdToDouble nid) ++ ")"
+instance Show Id where
+  show nid = BSC.unpack (HEX.encode $ unId nid)
 
-instance FromJSON NodeId where
-  parseJSON (String s) = pure $ NodeId $ fst (HEX.decode $ encodeUtf8 s)
+instance FromJSON Id where
+  parseJSON (String s) = pure $ Id $ fst (HEX.decode $ encodeUtf8 s)
   parseJSON _ = mzero
 
-instance ToJSON NodeId where
-  toJSON (NodeId bs) = toJSON $ decodeUtf8 $ HEX.encode bs
+instance ToJSON Id where
+  toJSON (Id bs) = toJSON $ decodeUtf8 $ HEX.encode bs
 
-instance HasLocation NodeId where
-  hasLocToInteger = nodeIdToInteger
-  hasLocMax       = NodeId $ BS.replicate 32 255
+instance HasLocation Id where
+  hasLocToInteger = idToInteger
+  hasLocMax       = Id $ BS.replicate 32 255
 
-nodeIdToInteger :: NodeId -> Integer
-nodeIdToInteger (NodeId bs) = BS.foldl' (\i bb -> (i `shiftL` 8) + fromIntegral bb) 0 bs
+idToInteger :: Id -> Integer
+idToInteger (Id bs) = BS.foldl' (\i bb -> (i `shiftL` 8) + fromIntegral bb) 0 bs
 
-mkNodeId' :: BS.ByteString -> NodeId
-mkNodeId' bs
-  | BS.length bs /= 32 = error "mkNodeId': expected 32 bytes"
-  | otherwise = NodeId bs
+mkId' :: BS.ByteString -> Id
+mkId' bs
+  | BS.length bs /= 32 = error "mkId': expected 32 bytes"
+  | otherwise = Id bs
 
-randomNodeId :: RandomGen g => g -> (NodeId, g)
-randomNodeId g = let (bs, Just g') = BS.unfoldrN 32 (Just . random) g in (mkNodeId' bs, g')
+randomId :: RandomGen g => g -> (Id, g)
+randomId g = let (bs, Just g') = BS.unfoldrN 32 (Just . random) g in (mkId' bs, g')
 
 -------------------------------------------------------------------------------------------
 -- Locations
@@ -85,6 +89,10 @@ randomNodeId g = let (bs, Just g') = BS.unfoldrN 32 (Just . random) g in (mkNode
 class HasLocation a where
   hasLocToInteger :: a -> Integer
   hasLocMax       :: a
+
+--instance HasId a => HasLocation a where
+--  hasLocToInteger x = hasLocToInteger $ getId x
+--  hasLocMax = hasLocMax . getId
 
 newtype Location = Location { unLocation :: Rational } deriving ( Eq, Show )
 
@@ -144,7 +152,7 @@ scaleDist (LocDistance d) f
 -- |
 -- The node information which can be exchanged between peers.
 data NodeInfo a = NodeInfo
-                  { nodeId        :: NodeId -- ^ the globally unique node ID of 256 bits
+                  { nodeId        :: Id -- ^ the globally unique node ID of 256 bits
                   , nodeAddresses :: [a]
                   } deriving ( Eq, Show )
 

@@ -73,7 +73,7 @@ data Node a = Node
             , nodeIdentity    :: NodeInfo a                                      -- ^ our identity
             , nodeMidGen      :: MessageIdGen                                    -- ^ message id generator
             , nodeActMsgs     :: TVar (HMap.HashMap MessageId (ActiveMessage a)) -- ^ messages we're currently routing
-            , nodeNbo         :: NBO.Node NodeId (RoutedMessage a) (PeerNode a)  -- ^ our NBO identity for routing
+            , nodeNbo         :: NBO.Node Id (RoutedMessage a) (PeerNode a)      -- ^ our NBO identity for routing
             , nodeFreenet     :: FN.Freenet a                                    -- ^ our freenet compatibility layer
             , nodeArchives    :: FN.ArchiveCache                                 -- ^ Freenet LRU archive cache
             , nodeChkRequests :: RequestManager FN.ChkRequest FN.ChkBlock
@@ -93,13 +93,13 @@ mkNode self fn connect = do
 
   let
     nbo = NBO.Node
-        { NBO.location          = nodeId self
+        { NBO.selfLocation      = nodeId self
         , NBO.neighbours        = readTVar pns
         , NBO.neighbourLocation = peerId . pnPeer
         , NBO.popPred           = messagePopPred node . rmId
         , NBO.pushPred          = messagePushPred node . rmId
-        , NBO.routingInfo       = rmInfo
-        , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
+--        , NBO.routingInfo       = rmInfo
+--        , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
         
     node = Node peers connecting pns self midgen msgMap nbo fn ac chkRm sskRm
@@ -124,13 +124,13 @@ handlePeerMessages node pn msg = do
     peer = pnPeer pn
     
     route = void $ forkIO $ case msg of
-      Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _) -> do
+      Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _ _) -> do
         local <- FN.getChk fn req
         case local of
           Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
           Right blk -> atomically $ enqMessage pn $ Response mid $ FreenetChkBlock blk
 
-      Routed False rm@(RoutedMessage (FreenetSskRequest req) mid _) -> do
+      Routed False rm@(RoutedMessage (FreenetSskRequest req) mid _ _) -> do
         local <- FN.getSsk fn req
         case local of
           Left _    -> sendRoutedMessage node rm (Just pn) -- pass on
@@ -194,10 +194,10 @@ data ActiveMessage a = ActiveMessage
 instance Show a => Show (ActiveMessage a) where
   show (ActiveMessage s ps _) = "ActiveMessage {amStarted=" ++ show s ++ ", amPreds=" ++ show ps ++ "}"
 
-mkRoutedMessage :: PeerAddress a => Node a -> NodeId -> MessagePayload a -> IO ()
+mkRoutedMessage :: (HasId i, PeerAddress a) => Node a -> i -> MessagePayload a -> IO ()
 mkRoutedMessage node target msg = do
   mid <- atomically $ nextMessageId $ nodeMidGen node
-  sendRoutedMessage node (RoutedMessage msg mid $ NBO.mkRoutingInfo target) Nothing
+  sendRoutedMessage node (RoutedMessage msg mid [] (getId target)) Nothing
 
 sendRoutedMessage :: PeerAddress a => Node a -> RoutedMessage a -> Maybe (PeerNode a) -> IO ()
 sendRoutedMessage node msg prev = do
@@ -383,6 +383,9 @@ instance (Show a) => Show (PeerNode a) where
 instance Eq (PeerNode a) where
   (PeerNode p1 _ _) == (PeerNode p2 _ _) = p1 == p2
 
+--instance HasLocation (PeerNode a) where
+--  toLocation = toLocation . peerId . pnPeer 
+
 nodeConnectStatus :: ToJSON a => Node a -> IO Value
 nodeConnectStatus node = do
   now <- getTime
@@ -413,7 +416,7 @@ runPeerNode
   :: (PeerAddress a)
   => Node a
   -> MessageIO a    -- ^ the (source, sink) pair to talk to the peer
-  -> Maybe NodeId
+  -> Maybe Id
   -> IO ()
 runPeerNode node (src, sink) expected = do
   outq <- newTBMQueueIO 10

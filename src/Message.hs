@@ -133,13 +133,21 @@ instance Binary a => Binary (Message a) where
 data RoutedMessage a = RoutedMessage
                        { rmPayload :: MessagePayload a
                        , rmId      :: MessageId
-                       , rmInfo    :: NBO.RoutingInfo NodeId
+                       , rmMarked  :: [Id]
+                       , rmTarget  :: Id
                        }
                        deriving ( Show )
 
 instance Binary a => Binary (RoutedMessage a) where
-  put (RoutedMessage p mid ri) = put p >> put mid >> put ri
-  get = RoutedMessage <$> get <*> get <*> get
+  put (RoutedMessage p mid ms tgt) = put p >> put mid >> put ms >> put tgt
+  get = RoutedMessage <$> get <*> get <*> get <*> get
+
+instance NBO.Routable (RoutedMessage a) Id where
+  target = rmTarget
+  marked rm l = l `elem` (rmMarked rm)
+  mark rm l
+    | l `elem` (rmMarked rm) = rm
+    | otherwise = rm { rmMarked = (l : (rmMarked rm)) }
   
 putHeader :: Word8 -> Put
 putHeader t = put t

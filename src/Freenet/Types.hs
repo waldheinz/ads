@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings, MultiParamTypeClasses #-}
 
 module Freenet.Types (
-  Key(..), mkKey, mkKey',
+  Key(..), mkKey, mkKey', unKey,
   
   DataRequest(..),
   DataBlock(..),
@@ -15,8 +15,8 @@ import Control.Applicative ( (<$>), pure )
 import Control.Monad ( mzero )
 import qualified Data.Aeson as JSON
 import Data.Binary
-import Data.Binary.Put
-import Data.Binary.Get
+--import Data.Binary.Put
+--import Data.Binary.Get
 import Data.Bits ( shiftL, testBit, xor )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
@@ -28,23 +28,27 @@ import Freenet.Base64
 import Types
 import Utils
 
-newtype Key = Key { unKey :: BS.ByteString } deriving ( Eq, Ord )
+newtype Key = Key { unKey' :: Id } deriving ( Eq, Ord )
+
+unKey :: Key -> BS.ByteString
+unKey = unId . unKey'
 
 keySize :: Int
 keySize = 32
 
 instance Show Key where
-  show (Key bs) = T.unpack $ toBase64' bs
-
-instance Hashable Key where
-  hashWithSalt s k = hashWithSalt s (unKey k)
+  show (Key i) = T.unpack $ toBase64' $ unId i
 
 instance HasLocation Key where
+  hasLocToInteger k = hasLocToInteger $ unKey' k
+  hasLocMax = Key $ (hasLocMax :: Id)
   
+instance Hashable Key where
+  hashWithSalt s k = hashWithSalt s (unId $ unKey' k)
 
 instance Binary Key where
-  put (Key k) = putByteString k
-  get = Key <$> getByteString keySize
+  put (Key i) = put i
+  get = Key <$> get
 
 instance JSON.FromJSON Key where
   parseJSON (JSON.String s) = case fromBase64' s of
@@ -58,15 +62,18 @@ instance JSON.FromJSON Key where
 instance JSON.ToJSON Key where
   toJSON = JSON.toJSON . toBase64' . unKey
 
+instance HasId Key where
+  getId = unKey'
+
 mkKey :: BS.ByteString -> Either T.Text Key
 mkKey bs = if BS.length bs == keySize
-           then Right $ Key bs
+           then Right $ Key $ mkId' bs
            else Left  $ "keys must be 32 bytes"
 
 mkKey' :: BS.ByteString -> Key
-mkKey' bs
-  | BS.length bs == keySize = Key bs
-  | otherwise               = error "expected 32 bytes in mkKey"
+mkKey' bs = Key $ mkId' bs
+--  | BS.length bs == keySize = Key $ mkbs
+--  | otherwise               = error "expected 32 bytes in mkKey"
 
 -----------------------------------------------------------------------------------------
 -- data blocks, requests and routing them

@@ -75,7 +75,7 @@ main = withSocketsDo $ do
     if e
     then JSON.decode <$> BSL.readFile infoFile
     else do
-      nid <- getStdRandom randomNodeId
+      nid <- getStdRandom randomId
       let result = NodeInfo nid ([] :: [TcpAddress])
       BSL.writeFile infoFile $ JSON.encode result
       return $ Just result
