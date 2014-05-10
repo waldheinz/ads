@@ -31,7 +31,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
 import qualified Data.Conduit.TQueue as C
-import Data.List ( nub )
+import Data.List ( minimumBy, nub )
 import qualified Data.HashMap.Strict as HMap
 import Data.Maybe ( isJust )
 import qualified Data.Text as T
@@ -96,8 +96,8 @@ mkNode self fn connect = do
         { NBO.selfLocation      = nodeId self
         , NBO.neighbours        = readTVar pns
         , NBO.neighbourLocation = peerId . pnPeer
-        , NBO.popPred           = messagePopPred node . rmId
-        , NBO.pushPred          = messagePushPred node . rmId
+        , NBO.popPred           = undefined -- messagePopPred node . rmId
+        , NBO.pushPred          = undefined -- messagePushPred node . rmId
 --        , NBO.routingInfo       = rmInfo
 --        , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
         }
@@ -161,6 +161,20 @@ handlePeerMessages node pn msg = do
     
   writeStores >> route
 
+-----------------------------------------------------------------------------------------------
+-- Routing
+-----------------------------------------------------------------------------------------------
+
+data ActiveMessage a = ActiveMessage
+                       { amStarted       :: ! Timestamp          -- ^ when this message was last routed
+                       , amPreds         :: ! [PeerNode a]       -- ^ predecessors (peers who think we're close to the target)
+                       , amPayload       :: ! (MessagePayload a) -- ^ payload of that message
+                       , amLastForwarded :: ! (PeerNode a)       -- ^ where the message was last forwarded
+                       }
+
+instance Show a => Show (ActiveMessage a) where
+  show (ActiveMessage s ps _ _) = "ActiveMessage {amStarted=" ++ show s ++ ", amPreds=" ++ show ps ++ "}"
+
 handleResponse :: Show a => Node a -> Peer a -> MessageId -> MessagePayload a -> STM String
 handleResponse node peer mid msg = do
   m <- readTVar (nodeActMsgs node)
@@ -179,21 +193,8 @@ handleResponse node peer mid msg = do
         (pn:[]) -> enqMessage pn (Response mid msg) >> return (HMap.delete mid m, "sent and dropped AM")
         (pn:ps) -> enqMessage pn (Response mid msg) >> return (HMap.insert mid (am { amPreds = ps }) m, "sent to " ++ show pn)
       
-      writeTVar (nodeActMsgs node) m' >> return logMsg
+      seq m' $ writeTVar (nodeActMsgs node) m' >> return logMsg
       
------------------------------------------------------------------------------------------------
--- Routing
------------------------------------------------------------------------------------------------
-
-data ActiveMessage a = ActiveMessage
-                       { amStarted :: ! Timestamp          -- ^ when this message was last routed
-                       , amPreds   :: ! [PeerNode a]       -- ^ predecessors (peers who think we're close to the target)
-                       , amPayload :: ! (MessagePayload a) -- ^ payload of that message
-                       }
-
-instance Show a => Show (ActiveMessage a) where
-  show (ActiveMessage s ps _) = "ActiveMessage {amStarted=" ++ show s ++ ", amPreds=" ++ show ps ++ "}"
-
 mkRoutedMessage :: (HasId i, PeerAddress a) => Node a -> i -> MessagePayload a -> IO ()
 mkRoutedMessage node target msg = do
   mid <- atomically $ nextMessageId $ nodeMidGen node
@@ -204,6 +205,83 @@ sendRoutedMessage node msg prev = do
   now <- getTime
   
   logMsg <- atomically $ do
+    amMap      <- readTVar $ nodeActMsgs node
+    neighbours <- readTVar $ nodePeerNodes node
+
+    let
+      myId      = nodeId $ nodeIdentity node
+      tgt       = toLocation $ (NBO.target msg :: Id)
+      nLoc      = peerId . pnPeer
+      notMarked = filter (\n -> not $ msg `NBO.marked` (nLoc n)) neighbours
+      next      = minimumBy (\n1 n2 -> cmp (toLocation $ nLoc n1) (toLocation $ nLoc n2)) notMarked where
+        cmp l1 l2 = compare d1 d2 where (d1, d2) = (absLocDist tgt l1, absLocDist tgt l2)
+      msg'      = NBO.mark msg myId
+      mid       = rmId msg
+      dropAm    = writeTVar (nodeActMsgs node) $! HMap.delete mid amMap
+      
+      forward m = do
+        -- update or create the AM
+        writeTVar (nodeActMsgs node) $! HMap.insert mid
+          ( case HMap.lookup mid amMap of
+               Nothing -> ActiveMessage now [next] (rmPayload msg) next
+               Just am -> am { amStarted = now, amPreds = (next : (amPreds am)), amLastForwarded = next }
+          ) amMap
+
+        enqMessage next (Routed False m)
+        return $ "forwarded to " ++ show next
+        
+      backtrack = case prev of
+        Just p  -> do
+          -- a remote message, but we can't make any progress
+          enqMessage p (Routed True  msg')
+          dropAm
+          return "immediately backtracked"
+          
+        Nothing -> do
+          -- the message was either local or backtracked to us
+          case HMap.lookup mid amMap of
+            Nothing -> return "unknown message"
+            Just am -> do
+              -- whoever we sent the message to did not make any progress, update stats
+              case rmPayload msg of
+                FreenetChkRequest req -> peerFetchDone (pnPeer $ amLastForwarded am) (FN.dataRequestLocation req) False
+                _                     -> return ()
+              
+              -- try to pop a predecessor
+              case amPreds am of
+                []     -> dropAm >> return "routing failed"
+                (p:ps) -> do
+                  enqMessage p (Routed True  msg')
+                  writeTVar (nodeActMsgs node) $! HMap.insert mid am { amPreds = ps } amMap
+                  return $ "backtracked to " ++ show p
+              
+    if (not . null) notMarked
+      then if absLocDist (toLocation $ nLoc next) tgt >= absLocDist (toLocation myId) tgt
+           then forward msg  -- forward but don't mark
+           else forward msg' -- forward and mark
+      else backtrack -- check if we can backtrack
+      
+{-    
+    let
+      mm = mark msg $ selfLocation v
+
+    s <- filter (\n -> not $ marked m (neighbourLocation v n)) <$> neighbours v
+  
+    if (not . null) s
+      then do
+        let next = closest s
+                 
+        if absLocDist (toLocation $ neighbourLocation v next) tgt >= absLocDist (toLocation $ selfLocation v) tgt
+          then return $ Forward next mm
+          else return $ Forward next msg
+      else do
+      -- check if we can backtrack
+      
+        p <- popPred v msg
+        case p of
+          Nothing -> return Fail
+          Just pp -> return $ Backtrack pp mm
+    
     -- create an ActiveMessage or update the message's timestamp
     let
       mid = rmId msg
@@ -221,9 +299,10 @@ sendRoutedMessage node msg prev = do
           return "routing failed"
             
         Just pn -> handleResponse node (pnPeer pn) (rmId msg) (Failed $ Just "routing failed")
-  
+-}
   logD $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
-
+  
+{-
 messagePushPred :: Node a -> MessageId -> PeerNode a -> STM ()
 messagePushPred node mid pn = modifyTVar' (nodeActMsgs node) $ HMap.adjust prepend mid
   where
@@ -247,6 +326,7 @@ messagePopPred node mid = do
   case tgt of
     Just (ActiveMessage _ (x:_) _) -> return $ Just x
     _                              -> return Nothing
+-}
 
 -- |
 -- Generate JSON containing some information about the currently
