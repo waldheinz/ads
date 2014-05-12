@@ -47,7 +47,6 @@ import qualified Freenet.Ssk as FN
 import qualified Freenet.Types as FN
 import qualified Freenet.URI as FN
 import Message as MSG
-import qualified NextBestOnce as NBO
 import Peers
 import Time
 import Types
@@ -73,7 +72,6 @@ data Node a = Node
             , nodeIdentity    :: NodeInfo a                                      -- ^ our identity
             , nodeMidGen      :: MessageIdGen                                    -- ^ message id generator
             , nodeActMsgs     :: TVar (HMap.HashMap MessageId (ActiveMessage a)) -- ^ messages we're currently routing
-            , nodeNbo         :: NBO.Node Id (RoutedMessage a) (PeerNode a)      -- ^ our NBO identity for routing
             , nodeFreenet     :: FN.Freenet a                                    -- ^ our freenet compatibility layer
             , nodeArchives    :: FN.ArchiveCache                                 -- ^ Freenet LRU archive cache
             , nodeChkRequests :: RequestManager FN.ChkRequest FN.ChkBlock
@@ -92,17 +90,7 @@ mkNode self fn connect = do
   sskRm  <- atomically mkRequestManager
 
   let
-    nbo = NBO.Node
-        { NBO.selfLocation      = nodeId self
-        , NBO.neighbours        = readTVar pns
-        , NBO.neighbourLocation = peerId . pnPeer
-        , NBO.popPred           = undefined -- messagePopPred node . rmId
-        , NBO.pushPred          = undefined -- messagePushPred node . rmId
---        , NBO.routingInfo       = rmInfo
---        , NBO.updateRoutingInfo = \rm ri -> rm { rmInfo = ri }
-        }
-        
-    node = Node peers connecting pns self midgen msgMap nbo fn ac chkRm sskRm
+    node = Node peers connecting pns self midgen msgMap fn ac chkRm sskRm
 
   void $ forkIO $ maintainConnections node connect
   return node
@@ -210,12 +198,12 @@ sendRoutedMessage node msg prev = do
 
     let
       myId      = nodeId $ nodeIdentity node
-      tgt       = toLocation $ (NBO.target msg :: Id)
+      tgt       = toLocation $ (routeTarget msg :: Id)
       nLoc      = peerId . pnPeer
-      notMarked = filter (\n -> not $ msg `NBO.marked` (nLoc n)) neighbours
+      notMarked = filter (\n -> not $ msg `routeMarked` (nLoc n)) neighbours
       next      = minimumBy (\n1 n2 -> cmp (toLocation $ nLoc n1) (toLocation $ nLoc n2)) notMarked where
         cmp l1 l2 = compare d1 d2 where (d1, d2) = (absLocDist tgt l1, absLocDist tgt l2)
-      msg'      = NBO.mark msg myId
+      msg'      = routeMark msg myId
       mid       = rmId msg
       dropAm    = writeTVar (nodeActMsgs node) $! HMap.delete mid amMap
       

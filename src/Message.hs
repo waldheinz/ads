@@ -4,7 +4,8 @@
 module Message (
   MessagePayload(..), RoutedMessage(..), 
   MessageSource, MessageSink, MessageIO,
-  Message(..),
+  Message(..), Routable(..),
+  
   -- * Message IDs
   MessageId, MessageIdGen, mkMessageIdGen, nextMessageId
   ) where
@@ -20,7 +21,6 @@ import System.Random ( random )
 
 import qualified Freenet.Chk as FN
 import qualified Freenet.Ssk as FN
-import qualified NextBestOnce as NBO
 import Types
 
 -- |
@@ -142,10 +142,15 @@ instance Binary a => Binary (RoutedMessage a) where
   put (RoutedMessage p mid ms tgt) = put p >> put mid >> put ms >> put tgt
   get = RoutedMessage <$> get <*> get <*> get <*> get
 
-instance NBO.Routable (RoutedMessage a) Id where
-  target = rmTarget
-  marked rm l = l `elem` (rmMarked rm)
-  mark rm l
+class HasLocation l => Routable m l where
+  routeMarked :: m -> l -> Bool -- ^ is the location already marked?
+  routeMark   :: m -> l -> m    -- ^ mark the specified location
+  routeTarget :: m -> l         -- ^ where should the message be routed
+
+instance Routable (RoutedMessage a) Id where
+  routeTarget = rmTarget
+  routeMarked rm l = l `elem` (rmMarked rm)
+  routeMark rm l
     | l `elem` (rmMarked rm) = rm
     | otherwise = rm { rmMarked = (l : (rmMarked rm)) }
   
