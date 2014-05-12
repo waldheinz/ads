@@ -208,13 +208,18 @@ sendRoutedMessage node msg prev = do
       dropAm    = writeTVar (nodeActMsgs node) $! HMap.delete mid amMap
       
       forward m = do
-        -- update or create the AM
-        writeTVar (nodeActMsgs node) $! HMap.insert mid
-          ( case HMap.lookup mid amMap of
-               Nothing -> ActiveMessage now [next] (rmPayload msg) next
-               Just am -> am { amStarted = now, amPreds = (next : (amPreds am)), amLastForwarded = next }
-          ) amMap
+        let
+          -- update or create the AM
+          am' = case HMap.lookup mid amMap of
+            Nothing -> ActiveMessage now [] (rmPayload msg) next
+            Just am -> am { amStarted = now, amLastForwarded = next }
 
+          -- add predecessor
+          am'' = case prev of
+            Nothing -> am'
+            Just p  -> am' { amPreds = (p : amPreds am') }
+            
+        writeTVar (nodeActMsgs node) $! HMap.insert mid am'' amMap
         enqMessage next (Routed False m)
         return $ "forwarded to " ++ show next
         
