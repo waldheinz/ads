@@ -245,7 +245,9 @@ sendRoutedMessage node msg prev = do
                 []     -> dropAm >> return "routing failed"
                 (p:ps) -> do
                   enqMessage p (Routed True  msg')
-                  writeTVar (nodeActMsgs node) $! HMap.insert mid am { amPreds = ps } amMap
+                  if null ps
+                    then writeTVar (nodeActMsgs node) $! HMap.delete mid amMap
+                    else writeTVar (nodeActMsgs node) $! HMap.insert mid am { amPreds = ps } amMap
                   return $ "backtracked to " ++ show p
               
     if (not . null) notMarked
