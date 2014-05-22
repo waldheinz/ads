@@ -1,5 +1,5 @@
 
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, PackageImports #-}
 
 module Freenet.Store (
   StoreFile, mkStoreFile, shutdownStore,
@@ -9,40 +9,46 @@ module Freenet.Store (
   StorePersistable(..)
   ) where
 
-import qualified Control.Concurrent.Lock as Lock
+import qualified Control.Concurrent.ReadWriteLock as Lock
 import Control.Concurrent.STM
 import Control.Monad ( unless, void, when )
 import Data.Aeson
 import Data.Binary
 import Data.Binary.Get ( runGetOrFail )
 import Data.Binary.Put ( runPut )
-import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Internal as BSI
+import qualified Data.ByteString.Unsafe as BSU
 import Data.Hashable
+import Foreign.Ptr ( castPtr, plusPtr )
 import System.Directory ( renameFile )
-import System.IO
 import System.IO.Error ( catchIOError )
 import System.Log.Logger
+import System.Posix.IO ( OpenMode(..), defaultFileFlags, openFd, closeFd )
+import "unix-bytestring" System.Posix.IO.ByteString ( fdPreadBuf, fdPwriteBuf )
+import System.Posix.Types ( ByteCount, Fd, FileOffset )
 import System.Random ( randomRIO )
 
 import Freenet.Types
 import Statistics
 import Types
+import Utils
 
 ----------------------------------------------------------------
 -- store types
 ----------------------------------------------------------------
 
 data StoreFile f = StoreFile
-                     { sfLock        :: ! Lock.Lock -- ^ for accessing the handle
+                     { sfLock        :: ! Lock.RWLock -- ^ for accessing the handle
                      , sfFileName    :: ! FilePath
                      , sfEntrySize   :: ! Int
                      , sfEntryCount  :: ! Int
                      , sfReads       :: ! (TVar Word64) -- ^ total number of reads
                      , sfReadSuccess :: ! (TVar Word64) -- ^ number of successful reads
                      , sfHistogram   :: ! THistogram
-                     , sfHandle      :: ! Handle
-                     , sfReadOffset  :: ! (Integer -> IO (Maybe f)) -- ^ try to read data from the given offset
-                     , sfWriteOffset :: ! (Integer -> f -> IO ())   -- ^ actually write data to the given offset
+                     , sfFd          :: ! Fd                        -- ^ file descriptor
+                     , sfReadOffset  :: ! (FileOffset -> IO (Maybe f)) -- ^ try to read data from the given offset
+                     , sfWriteOffset :: ! (FileOffset -> f -> IO ())   -- ^ actually write data to the given offset
                      }
 
 instance ToStateJSON (StoreFile f) where
@@ -69,8 +75,8 @@ mkStoreFile sp fileName count = do
     entrySize = 1 + storeSize sp
     fileSize  = count * (fromIntegral entrySize)
   
-  handle <- openBinaryFile fileName ReadWriteMode
-  hSetFileSize handle $ fromIntegral fileSize
+  handle <- openFd fileName ReadWrite (Just 0x0600) defaultFileFlags
+--  hSetFileSize handle $ fromIntegral fileSize
   
   rds  <- newTVarIO 0
   scs  <- newTVarIO 0
@@ -78,7 +84,7 @@ mkStoreFile sp fileName count = do
   (needScan, hist) <- readStats fileName
   
   let sf = StoreFile lck fileName entrySize count rds scs hist handle
-           (readOffset sf handle) (writeOffset sf handle)
+           (readOffset sf) (writeOffset sf)
            
   when needScan $ void $ scanStore sf
   
@@ -103,7 +109,7 @@ shutdownStore :: StoreFile f -> IO ()
 shutdownStore sf = do
   logI $ "shutting down store"
 
-  hClose $ sfHandle sf
+  closeFd $ sfFd sf
   hist <- atomically $ freezeHistogram (sfHistogram sf)
   encodeFile (sfFileName sf ++ "-histogram") hist
   
@@ -112,27 +118,48 @@ scanStore sf = do mapM_ checkOffset offsets
   where
     ecount  = fromIntegral $ sfEntryCount sf
     esize   = fromIntegral $ sfEntrySize sf
-    offsets = [0, esize .. (ecount - 1) * esize] :: [Integer]
+    offsets = [0, esize .. (ecount - 1) * esize] :: [FileOffset]
 
     checkOffset o = do
-      r <- Lock.with (sfLock sf) $ sfReadOffset sf o
+      r <- sfReadOffset sf o
       
       case r of
         Nothing -> return ()
         Just df -> atomically $ histInc (sfHistogram sf) $ dataBlockLocation df
 
-locOffsets :: StoreFile f -> Key -> [Integer]
+locOffsets :: StoreFile f -> Key -> [FileOffset]
 locOffsets sf loc = map (\i -> (fromIntegral i `rem` (fromIntegral count)) * (fromIntegral entrySize)) [idx .. idx + 5]
   where
     idx = (fromIntegral $ hash loc :: Word32) `rem` (fromIntegral count)
     count = sfEntryCount sf
     entrySize = sfEntrySize sf
 
+pwriteBS :: Fd -> BS.ByteString -> FileOffset -> IO ()
+pwriteBS fd bs o = BSU.unsafeUseAsCStringLen bs $ \(buf, len) -> do
+  let
+    go done = fdPwriteBuf fd (castPtr buf `plusPtr` done) ((fromIntegral len) - (fromIntegral done)) (o + (fromIntegral done)) >>= \written ->
+      if (done + (fromIntegral written)) == (fromIntegral len)
+      then return ()
+      else go (done + (fromIntegral written))
+  
+  go 0
+
+preadBS :: Fd -> FileOffset -> ByteCount -> IO BS.ByteString
+preadBS fd o len = BSI.create (fromIntegral len) $ \buf -> do
+  let
+    go done = fdPreadBuf fd (castPtr buf `plusPtr` (fromIntegral done)) (len - done) (o + (fromIntegral done)) >>= \rd ->
+      if rd == 0
+      then error "hit EOF while reading"
+      else if (done + (fromIntegral rd)) == len
+           then return ()
+           else go (done + (fromIntegral rd))
+      
+  go 0
+
 -- | Actually write data to the given offset and update stats.
-writeOffset :: StorePersistable f => StoreFile f -> Handle -> Integer -> f -> IO ()
-writeOffset sf handle o df = do
-  hSeek handle AbsoluteSeek o
-  BSL.hPut handle $ runPut doPut
+writeOffset :: StorePersistable f => StoreFile f -> FileOffset -> f -> IO ()
+writeOffset sf o df = do
+  Lock.withWrite (sfLock sf) $ pwriteBS (sfFd sf) (bsToStrict $ runPut doPut) o
   logI $ (show loc) ++ " written at " ++ show o
   atomically $ histInc (sfHistogram sf) loc
   where
@@ -140,7 +167,7 @@ writeOffset sf handle o df = do
     doPut = putWord8 1 >> storePut df
     
 putData :: StorePersistable f => StoreFile f -> f -> IO ()
-putData sf df = Lock.with (sfLock sf) $ go [] (locOffsets sf loc) where
+putData sf df = go [] (locOffsets sf loc) where
   loc = dataBlockLocation df
   -- there are no free slots, we must decide if and which we want to overwrite
   go olds [] = do
@@ -157,12 +184,11 @@ putData sf df = Lock.with (sfLock sf) $ go [] (locOffsets sf loc) where
     Just df' -> let loc' = dataBlockLocation df' -- we're done if the data is already there
                 in unless (loc == loc') $ go ((o, loc'):olds) os
 
-readOffset :: StorePersistable f => StoreFile f -> Handle -> Integer -> IO (Maybe f)
-readOffset sf handle offset = do
-  hSeek handle AbsoluteSeek offset
-  d <- BSL.hGet handle $ sfEntrySize sf
+readOffset :: StorePersistable f => StoreFile f -> FileOffset -> IO (Maybe f)
+readOffset sf offset = do
+  d <- Lock.withRead (sfLock sf) $ preadBS (sfFd sf) offset (fromIntegral $ sfEntrySize sf)
   
-  case runGetOrFail doGet d of
+  case runGetOrFail doGet (bsFromStrict d) of
     Left (_, _, _)   -> return Nothing
     Right (_, _, df) -> return $ Just df
     
@@ -172,7 +198,7 @@ readOffset sf handle offset = do
       _ -> fail "empty slot"
       
 getData :: StorePersistable f => StoreFile f -> Key -> IO (Maybe f)
-getData sf key = Lock.with (sfLock sf) $ doRead key >>= \result -> countRead result >> return result where
+getData sf key = doRead key >>= \result -> countRead result >> return result where
   
   countRead r = atomically $ modifyTVar' (sfReads sf) (+1) >> case r of
     Nothing -> return ()

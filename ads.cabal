@@ -60,6 +60,7 @@ executable ads
     time                 >= 1.1,
     transformers         >= 0.3,
     unix                 >= 2.6,
+    unix-bytestring,
     unordered-containers >= 0.2,
     vector               >= 0.10,
     void                 >= 0.6,
