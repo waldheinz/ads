@@ -28,8 +28,8 @@ import Utils
 -- An Archive is just a map from file names to file contents.
 type Archive = Map.HashMap String BSL.ByteString
 
-logI :: String -> IO ()
-logI m = infoM "freenet.archive" m
+logD :: String -> IO ()
+logD m = debugM "freenet.archive" m
 
 newtype ArchiveKey = ArchiveKey (RedirectTarget, ArchiveType) deriving ( Eq, Ord )
 
@@ -73,7 +73,7 @@ fetchArchive fetch ac tgt tp = do
 
 fetchArchive' :: UriFetch a => a -> RedirectTarget -> ArchiveType -> IO (Either T.Text Archive)
 fetchArchive' fetch tgt tp = do
-  logI $ "fetching archive " ++ show tgt
+  logD $ "fetching archive " ++ show tgt
   
   arch <- fetchRedirect' fetch tgt
 
@@ -98,15 +98,15 @@ fetchArchive' fetch tgt tp = do
 
 fetchRedirect' :: UriFetch a => a -> RedirectTarget -> IO (Either T.Text BSL.ByteString)
 fetchRedirect' fetch (RedirectKey _ uri) = do
-  logI $ "fetch redirect' to " ++ show uri
+  logD $ "fetch redirect' to " ++ show uri
+  
   mbs <- getUriData fetch uri
   case mbs of
     Left e   -> return $ Left $ "fetchRedirect': error with requestNodeData: " `T.append` e
     Right (bs, len) -> case parseMetadata (BSL.take (fromIntegral len) $ bsFromStrict bs) of
-      Left _  -> return $ Right $ BSL.take (fromIntegral len) $ bsFromStrict bs  -- return $ Left $ "fetchRedirect': can't parse metadata: " `T.append` e'
+      Left _  -> return $ Right $ BSL.take (fromIntegral len) $ bsFromStrict bs
       Right md -> case md of
         ArchiveManifest (RedirectSplitFile sf) _ _ _ -> fetchSplitFile fetch sf
         _ -> return $ Left $ "fetchRedirect': what shall I do with metadata: " `T.append` (T.pack $ show md)
 
 fetchRedirect' fetch (RedirectSplitFile sf) = fetchSplitFile fetch sf
-
