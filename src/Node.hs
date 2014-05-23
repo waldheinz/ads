@@ -201,27 +201,14 @@ sendRoutedMessage node msg prev = do
       tgt       = toLocation $ (routeTarget msg :: Id)
       nLoc      = peerId . pnPeer
       notMarked = filter (\n -> not $ msg `routeMarked` (nLoc n)) neighbours
-      next      = minimumBy (\n1 n2 -> cmp (toLocation $ nLoc n1) (toLocation $ nLoc n2)) notMarked where
-        cmp l1 l2 = compare d1 d2 where (d1, d2) = (absLocDist tgt l1, absLocDist tgt l2)
+      nextBest  = if null notMarked
+                  then Nothing
+                  else Just $ minimumBy (\n1 n2 -> cmp (toLocation $ nLoc n1) (toLocation $ nLoc n2)) notMarked where
+                    cmp l1 l2 = compare d1 d2 where (d1, d2) = (absLocDist tgt l1, absLocDist tgt l2)
+      
       msg'      = routeMark msg myId
       mid       = rmId msg
       dropAm    = writeTVar (nodeActMsgs node) $! HMap.delete mid amMap
-      
-      forward m = do
-        let
-          -- update or create the AM
-          am' = case HMap.lookup mid amMap of
-            Nothing -> ActiveMessage now [] (rmPayload msg) next
-            Just am -> am { amStarted = now, amLastForwarded = next }
-
-          -- add predecessor
-          am'' = case prev of
-            Nothing -> am'
-            Just p  -> am' { amPreds = (p : amPreds am') }
-            
-        writeTVar (nodeActMsgs node) $! HMap.insert mid am'' amMap
-        enqMessage next (Routed False m)
-        return $ "forwarded to " ++ show next
         
       backtrack = case prev of
         Just p  -> do
@@ -249,80 +236,32 @@ sendRoutedMessage node msg prev = do
                     then writeTVar (nodeActMsgs node) $! HMap.delete mid amMap
                     else writeTVar (nodeActMsgs node) $! HMap.insert mid am { amPreds = ps } amMap
                   return $ "backtracked to " ++ show p
-              
-    if (not . null) notMarked
-      then if absLocDist (toLocation $ nLoc next) tgt >= absLocDist (toLocation myId) tgt
+    
+    case nextBest of
+      Nothing   -> backtrack
+      Just next ->
+        let
+          -- update or create the AM
+          am' = case HMap.lookup mid amMap of
+            Nothing -> ActiveMessage now [] (rmPayload msg) next
+            Just am -> am { amStarted = now, amLastForwarded = next }
+
+          -- add predecessor
+          am'' = case prev of
+            Nothing -> am'
+            Just p  -> am' { amPreds = (p : amPreds am') }
+          
+          forward m = do
+            writeTVar (nodeActMsgs node) $! HMap.insert mid am'' amMap
+            enqMessage next (Routed False m)
+            return $ "forwarded to " ++ show next
+      
+        in if absLocDist (toLocation $ nLoc next) tgt >= absLocDist (toLocation myId) tgt
            then forward msg  -- forward but don't mark
            else forward msg' -- forward and mark
-      else backtrack -- check if we can backtrack
-      
-{-    
-    let
-      mm = mark msg $ selfLocation v
 
-    s <- filter (\n -> not $ marked m (neighbourLocation v n)) <$> neighbours v
-  
-    if (not . null) s
-      then do
-        let next = closest s
-                 
-        if absLocDist (toLocation $ neighbourLocation v next) tgt >= absLocDist (toLocation $ selfLocation v) tgt
-          then return $ Forward next mm
-          else return $ Forward next msg
-      else do
-      -- check if we can backtrack
-      
-        p <- popPred v msg
-        case p of
-          Nothing -> return Fail
-          Just pp -> return $ Backtrack pp mm
+  logI $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
     
-    -- create an ActiveMessage or update the message's timestamp
-    let
-      mid = rmId msg
-      go Nothing   = ActiveMessage now [] (rmPayload msg)
-      go (Just am) = am { amStarted = now }
-      in modifyTVar' (nodeActMsgs node) $ \m -> HMap.insert mid (go $ HMap.lookup mid m) m
-  
-    -- let the routing run
-    NBO.route (nodeNbo node) prev msg >>= \nextStep -> case nextStep of
-      NBO.Forward dest msg'   -> enqMessage dest (Routed False msg') >> (return $ "forwarded to " ++ show dest)
-      NBO.Backtrack dest msg' -> enqMessage dest (Routed True  msg') >> (return $ "backtracked to " ++ show dest)
-      NBO.Fail                -> case prev of
-        Nothing -> do
-          modifyTVar' (nodeActMsgs node) $ HMap.delete (rmId msg)
-          return "routing failed"
-            
-        Just pn -> handleResponse node (pnPeer pn) (rmId msg) (Failed $ Just "routing failed")
--}
-  logD $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
-  
-{-
-messagePushPred :: Node a -> MessageId -> PeerNode a -> STM ()
-messagePushPred node mid pn = modifyTVar' (nodeActMsgs node) $ HMap.adjust prepend mid
-  where
-    prepend am = am { amPreds = (pn : amPreds am) }
-
-messagePopPred :: Node a -> MessageId -> STM (Maybe (PeerNode a))
-messagePopPred node mid = do
-  let
-    amMap = nodeActMsgs node
-  
-  m <- readTVar amMap
-  
-  let
-    tgt = HMap.lookup mid m
-    
-  writeTVar amMap $ case tgt of
-      Just (ActiveMessage _ (_:[]) _) -> HMap.delete mid m -- remote messages without any more preds can be dropped
-      Just (ActiveMessage s (_:xs) p) -> HMap.insert mid (ActiveMessage s xs p) m -- messages with more preds just get a pred removed
-      _                               -> m
-  
-  case tgt of
-    Just (ActiveMessage _ (x:_) _) -> return $ Just x
-    _                              -> return Nothing
--}
-
 -- |
 -- Generate JSON containing some information about the currently
 -- routed messages.
