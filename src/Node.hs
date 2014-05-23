@@ -258,7 +258,7 @@ sendRoutedMessage node msg prev = do
           nd = absLocDist (toLocation $ nLoc next) tgt -- dist (nextNode, t)
           md = absLocDist (toLocation myId) tgt        -- dist (v, t)
           
-        in traceShow ("dists", nd, md) $ if nd >= md
+        in traceShow ("dists", nd, md, nd >= md) $ if nd >= md
            then forward msg' -- forward and mark
            else forward msg  -- forward but don't mark
 
