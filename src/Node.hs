@@ -231,6 +231,7 @@ sendRoutedMessage node msg prev = do
               -- try to pop a predecessor
               case amPreds am of
                 []     -> dropAm >> return "routing failed"
+                (p:[]) -> enqMessage p (Routed True  msg') >> dropAm >> (return $ "backtracked to " ++ show p ++ " and dropped")
                 (p:ps) -> do
                   enqMessage p (Routed True  msg')
                   writeTVar (nodeActMsgs node) $! HMap.insert mid am { amPreds = ps } amMap
