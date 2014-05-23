@@ -120,7 +120,10 @@ locMove (Location l) (LocDistance d)
 
 -- |
 -- Distance between two locations, always in [-0.5, 0.5].
-newtype LocDistance = LocDistance { _unDistance :: Rational } deriving ( Eq, Ord, Show )
+newtype LocDistance = LocDistance { _unDistance :: Rational } deriving ( Eq, Ord )
+
+instance Show LocDistance where
+  show (LocDistance d) = show (fromRational d :: Float)
 
 absLocDist :: Location -> Location -> LocDistance
 absLocDist (Location l1) (Location l2) = LocDistance $ (min d (1 - d)) where

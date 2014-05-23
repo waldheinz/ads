@@ -51,6 +51,8 @@ import Peers
 import Time
 import Types
 
+import Debug.Trace
+
 logD :: String -> IO ()
 logD = debugM "node"
 
@@ -214,8 +216,7 @@ sendRoutedMessage node msg prev = do
         Just p  -> do
           -- a remote message, but we can't make any progress
           enqMessage p (Routed True  msg')
-          dropAm
-          return "immediately backtracked"
+          return $ "immediately backtracked to " ++ show p
           
         Nothing -> do
           -- the message was either local or backtracked to us
@@ -232,9 +233,7 @@ sendRoutedMessage node msg prev = do
                 []     -> dropAm >> return "routing failed"
                 (p:ps) -> do
                   enqMessage p (Routed True  msg')
-                  if null ps
-                    then writeTVar (nodeActMsgs node) $! HMap.delete mid amMap
-                    else writeTVar (nodeActMsgs node) $! HMap.insert mid am { amPreds = ps } amMap
+                  writeTVar (nodeActMsgs node) $! HMap.insert mid am { amPreds = ps } amMap
                   return $ "backtracked to " ++ show p
     
     case nextBest of
@@ -255,10 +254,13 @@ sendRoutedMessage node msg prev = do
             writeTVar (nodeActMsgs node) $! HMap.insert mid am'' amMap
             enqMessage next (Routed False m)
             return $ "forwarded to " ++ show next
-      
-        in if absLocDist (toLocation $ nLoc next) tgt >= absLocDist (toLocation myId) tgt
-           then forward msg  -- forward but don't mark
-           else forward msg' -- forward and mark
+
+          nd = absLocDist (toLocation $ nLoc next) tgt -- dist (nextNode, t)
+          md = absLocDist (toLocation myId) tgt        -- dist (v, t)
+          
+        in traceShow ("dists", nd, md) $ if nd >= md
+           then forward msg' -- forward and mark
+           else forward msg  -- forward but don't mark
 
   logI $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
     

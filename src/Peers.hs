@@ -54,7 +54,7 @@ instance ToJSON a => ToStateJSON (Peer a) where
 mkPeer :: PeerAddress a => NodeInfo a -> STM (Peer a)
 mkPeer (NodeInfo nid addrs) = do
   as <- newTVar addrs
-  ps <- mkTEstimator 64 0.01 0.5
+  ps <- mkTEstimator 64 0.5 0.5
   return $ Peer nid as ps
 
 -- |
