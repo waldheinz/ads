@@ -51,8 +51,6 @@ import Peers
 import Time
 import Types
 
-import Debug.Trace
-
 logD :: String -> IO ()
 logD = debugM "node"
 
@@ -259,11 +257,11 @@ sendRoutedMessage node msg prev = do
           nd = absLocDist (toLocation $ nLoc next) tgt -- dist (nextNode, t)
           md = absLocDist (toLocation myId) tgt        -- dist (v, t)
           
-        in traceShow ("dists", nd, md, nd >= md) $ if nd >= md
+        in if nd >= md
            then forward msg' -- forward and mark
            else forward msg  -- forward but don't mark
 
-  logI $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
+  logD $ "routed message " ++ show (rmId msg) ++ ": " ++ logMsg
     
 -- |
 -- Generate JSON containing some information about the currently
