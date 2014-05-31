@@ -147,9 +147,6 @@ import Codec.Archive.Tar.Write
 import Codec.Archive.Tar.Pack
 import Codec.Archive.Tar.Unpack
 
-import Codec.Archive.Tar.Check
-
-import Control.Exception (Exception, throw, catch)
 import qualified Data.ByteString.Lazy as BS
 import Prelude hiding (read)
 

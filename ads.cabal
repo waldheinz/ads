@@ -17,13 +17,11 @@ data-files:
 
 executable ads
   main-is:             Main.hs
-  ghc-options:         -Wall -O2 -threaded -XDeriveDataTypeable
-  -- -debug
+  ghc-options:         -Wall -O2 -threaded
   c-sources:
     cbits/rijndael.c,
     cbits/lzma/lzma.c,
     cbits/lzma/LzmaDec.c
-    
   cc-options:          -Wall -O2 -std=c99
   build-depends:
     base                 ==4.*,

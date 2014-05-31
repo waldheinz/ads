@@ -11,6 +11,9 @@
 -- Perform various checks on tar file entries.
 --
 -----------------------------------------------------------------------------
+
+{-# LANGUAGE DeriveDataTypeable #-}
+
 module Codec.Archive.Tar.Check (
 
   -- * Security

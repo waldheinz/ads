@@ -11,6 +11,9 @@
 -- Portability :  portable
 --
 -----------------------------------------------------------------------------
+
+{-# LANGUAGE DeriveDataTypeable #-}
+
 module Codec.Archive.Tar.Read (read, FormatError(..)) where
 
 import Codec.Archive.Tar.Types

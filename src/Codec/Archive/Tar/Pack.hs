@@ -31,8 +31,6 @@ import System.Directory
          , Permissions(..), getPermissions )
 #if MIN_VERSION_directory(1,2,0)
 -- The directory package switched to the new time package
-import Data.Time.Clock
-         ( UTCTime )
 import Data.Time.Clock.POSIX
          ( utcTimeToPOSIXSeconds )
 #else
