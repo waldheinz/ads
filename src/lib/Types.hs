@@ -8,7 +8,7 @@ module Types (
   -- * Locations
   HasLocation(..), Location, mkLocation, toLocation,
   unLocation, rightOf,
-  LocDistance, locDist, absLocDist, scaleDist, locMove,
+  LocDistance, unDistance, locDist, absLocDist, scaleDist, locMove,
   
   -- * state aware serialization
   ToStateJSON(..),
@@ -28,6 +28,7 @@ import qualified Data.ByteString.Char8 as BSC
 import Data.Ratio ( (%) )
 import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
 import System.Random ( RandomGen, random )
+import Test.QuickCheck
 
 ----------------------------------------------------------------------
 -- STM aware serialization
@@ -95,6 +96,13 @@ newtype Location = Location { unLocation :: Rational } deriving ( Eq, Show )
 instance ToJSON Location where
   toJSON (Location l) = toJSON $ (fromRational l :: Double)
 
+instance Arbitrary Location where
+  arbitrary = do
+    d <- arbitrary
+    if d > 0
+      then choose (0, d - 1) >>= (\n -> return $ Location (n % d))
+      else return $ Location (0 % 1)
+
 mkLocation :: Real a => a -> Location
 mkLocation l
   | l < 0 || l >= 1 = error "mkLocation: location must be in [0..1)"
@@ -120,7 +128,7 @@ locMove (Location l) (LocDistance d)
 
 -- |
 -- Distance between two locations, always in [-0.5, 0.5].
-newtype LocDistance = LocDistance { _unDistance :: Rational } deriving ( Eq, Ord )
+newtype LocDistance = LocDistance { unDistance :: Rational } deriving ( Eq, Ord )
 
 instance Show LocDistance where
   show (LocDistance d) = show (fromRational d :: Float)
