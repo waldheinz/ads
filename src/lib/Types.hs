@@ -112,8 +112,8 @@ mkLocation l
 -- Determines if the shortes path on the circle goes to the right.
 rightOf :: Location -> Location -> Bool
 rightOf (Location l1) (Location l2)
-  | l1 < l2   = l2 - l1 > (1 % 2) 
-  | otherwise = l1 - l2 < (1 % 2)
+  | l1 < l2   = l2 - l1 >= (1 % 2) 
+  | otherwise = l1 - l2 <  (1 % 2)
 
 toLocation :: HasLocation a => a -> Location
 toLocation x = Location $ (hasLocToInteger x) % (1 + (hasLocToInteger $ hasLocMax `asTypeOf` x))
