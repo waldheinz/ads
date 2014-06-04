@@ -19,7 +19,6 @@ typeTests =
   , testProperty "locMove bounds" locMoveBounds
   , testProperty "undo move" locMoveReverse
   ]
-
   
 distInBounds :: Location -> Location -> Bool
 distInBounds l1 l2 = d >= (-1 % 2) && d <= (1 % 2) where

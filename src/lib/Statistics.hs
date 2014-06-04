@@ -9,7 +9,7 @@ module Statistics (
 
   -- * Scale Free Estimators
   TEstimator, mkTEstimator, updateTEstimator,
-  
+  teToList
   ) where
 
 import Control.Applicative ( (<$>) )
@@ -18,7 +18,6 @@ import Data.Aeson
 import Data.Binary
 import qualified Data.Array.IArray as IA
 import Data.Array.MArray
-import Data.Ratio
 
 import Types
 
@@ -27,7 +26,7 @@ import Types
 -----------------------------------------------------------------------
 
 data TEstimator = TEstimator
-                  { estPoints :: ! (TArray Int (Location, Double))
+                  { estPoints :: ! (TArray Int (Double, Double))
                   , estFactor :: ! Double
                   }
 
@@ -42,8 +41,11 @@ mkTEstimator
   -> Double -- ^ initial value for each data point
   -> STM TEstimator
 mkTEstimator cnt f v = do
-  arr <- newListArray (0, cnt - 1) [(mkLocation $ x % cnt, v) | x <- [0..(cnt-1)]]
+  arr <- newListArray (0, cnt - 1) [(fromIntegral x / (fromIntegral cnt), v) | x <- [0..(cnt-1)]]
   return $ TEstimator arr f
+
+teToList :: TEstimator -> STM [(Double, Double)]
+teToList = getElems . estPoints
 
 updateTEstimator
   :: TEstimator
@@ -51,31 +53,32 @@ updateTEstimator
   -> Double     -- ^ new value
   -> STM ()
 updateTEstimator est loc val = do
-  (l,  r ) <- teIndices est loc
+  (l,  r) <- teIndices est loc
   
   let
-    f'  = toRational f
-    arr = estPoints est
-    f   = estFactor est
-
+    arr  = estPoints est
+    f    = estFactor est
+    loc' = fromRational $ unLocation loc
+    
   readArray arr l >>= \(x0, y0) ->
-    writeArray arr l (x0 `locMove` ((loc `locDist` x0) `scaleDist` f'), y0 + (val - y0) * f)
+    writeArray arr l (x0 + ((loc' - x0) * f), y0 + (val - y0) * f)
     
   readArray arr r >>= \(x1, y1) ->
-    writeArray arr r (x1 `locMove` ((x1 `locDist` loc) `scaleDist` f'), y1 + (val - y1) * f)
+    writeArray arr r (x1 + ((x1 - loc') * f), y1 + (val - y1) * f)
 
 -- |
 -- Finds the (left, right) index pair for the given location.
 teIndices :: TEstimator -> Location -> STM (Int, Int)
 teIndices est loc = getBounds (estPoints est) >>= \(_, maxIdx) -> go maxIdx 0
   where
+    loc' = fromRational $ unLocation loc
     go mi n
       | n == mi = return (mi, 0) -- wrap around
       | otherwise = do
         (x1, _) <- readArray (estPoints est) n
         (x2, _) <- readArray (estPoints est) $ n + 1
         
-        if  (x2 `rightOf` loc) && (loc `rightOf` x1)
+        if  (x2 < loc') && (loc' < x1)
           then return (n, n + 1)
           else go mi $ n + 1
   

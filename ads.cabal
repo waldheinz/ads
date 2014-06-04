@@ -128,4 +128,5 @@ test-suite test-ads
     base                       >= 4.0,
     test-framework             >= 0.8,
     test-framework-quickcheck2 >= 0.3,
-    QuickCheck                 >= 2.0        
+    QuickCheck                 >= 2.0,
+    stm
