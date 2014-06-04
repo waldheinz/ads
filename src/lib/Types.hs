@@ -120,7 +120,7 @@ toLocation x = Location $ (hasLocToInteger x) % (1 + (hasLocToInteger $ hasLocMa
 
 locMove :: Location -> LocDistance -> Location
 locMove (Location l) (LocDistance d)
-  | l' >= 1   = Location $ 1 - l'
+  | l' >= 1   = Location $ l' - 1
   | l' < 0    = Location $ l' + 1
   | otherwise = Location l'
   where
@@ -132,6 +132,9 @@ newtype LocDistance = LocDistance { unDistance :: Rational } deriving ( Eq, Ord 
 
 instance Show LocDistance where
   show (LocDistance d) = show (fromRational d :: Float)
+
+instance Arbitrary LocDistance where
+  arbitrary = locDist <$> arbitrary <*> arbitrary
 
 absLocDist :: Location -> Location -> LocDistance
 absLocDist (Location l1) (Location l2) = LocDistance $ (min d (1 - d)) where
