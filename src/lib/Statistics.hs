@@ -47,6 +47,17 @@ mkTEstimator cnt f v = do
 teToList :: TEstimator -> STM [(Double, Double)]
 teToList = getElems . estPoints
 
+wrapLoc :: Double -> Double
+wrapLoc l
+  | l > 1 = l - 1
+  | l < 0 = 1 + l
+  | otherwise = l
+
+moveLoc :: Double -> Double -> Double -> Double
+moveLoc from to f
+  | abs (from - to) > 0.5 = wrapLoc $ from - (1 - (to - from))
+  | otherwise = wrapLoc $ from + (to - from) * f
+
 updateTEstimator
   :: TEstimator
   -> Location   -- ^ where to update the estimator
@@ -61,10 +72,10 @@ updateTEstimator est loc val = do
     loc' = fromRational $ unLocation loc
     
   readArray arr l >>= \(x0, y0) ->
-    writeArray arr l (x0 + ((loc' - x0) * f), y0 + (val - y0) * f)
+    writeArray arr l (moveLoc x0 loc' f, y0 + (val - y0) * f)
     
   readArray arr r >>= \(x1, y1) ->
-    writeArray arr r (x1 + ((x1 - loc') * f), y1 + (val - y1) * f)
+    writeArray arr r (moveLoc x1 loc' f, y1 + (val - y1) * f)
 
 -- |
 -- Finds the (left, right) index pair for the given location.
@@ -78,7 +89,7 @@ teIndices est loc = getBounds (estPoints est) >>= \(_, maxIdx) -> go maxIdx 0
         (x1, _) <- readArray (estPoints est) n
         (x2, _) <- readArray (estPoints est) $ n + 1
         
-        if  (x2 < loc') && (loc' < x1)
+        if  (loc' >= x1 && loc' < x2)
           then return (n, n + 1)
           else go mi $ n + 1
   
