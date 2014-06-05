@@ -5,6 +5,7 @@ module Freenet.Chk (
   -- * Working with CHKs
   ChkRequest(..), ChkBlock(..), mkChkBlock, decompressChk,
   encryptChk, ChkInsert(..), chkBlockUri, chkDataSize,
+  decryptChk,
 
   -- * CHK Headers
   ChkHeader, mkChkHeader, unChkHeader, chkHeaderHashId,

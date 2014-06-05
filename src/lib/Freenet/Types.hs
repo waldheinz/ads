@@ -11,20 +11,21 @@ module Freenet.Types (
   StorePersistable(..)
   ) where
 
-import Control.Applicative ( (<$>), pure )
-import Control.Monad ( mzero )
+import           Control.Applicative ( (<$>), pure )
+import           Control.Monad ( mzero, replicateM )
 import qualified Data.Aeson as JSON
-import Data.Binary
-import Data.Bits ( shiftL, testBit, xor )
+import           Data.Binary
+import           Data.Bits ( shiftL, testBit, xor )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL
-import Data.Digest.Pure.SHA ( bytestringDigest, sha256 )
-import Data.Hashable
+import           Data.Digest.Pure.SHA ( bytestringDigest, sha256 )
+import           Data.Hashable
 import qualified Data.Text as T
+import           Test.QuickCheck
 
-import Freenet.Base64
-import Types
-import Utils
+import           Freenet.Base64
+import           Types
+import           Utils
 
 newtype Key = Key { unKey' :: Id } deriving ( Eq, Ord )
 
@@ -63,6 +64,9 @@ instance JSON.ToJSON Key where
 instance HasId Key where
   getId = unKey'
 
+instance Arbitrary Key where
+  arbitrary = mkKey' . BS.pack <$> replicateM 32 arbitrary
+
 mkKey :: BS.ByteString -> Either T.Text Key
 mkKey bs = if BS.length bs == keySize
            then Right $ Key $ mkId' bs
@@ -74,9 +78,6 @@ mkKey' bs = Key $ mkId' bs
 -----------------------------------------------------------------------------------------
 -- data blocks, requests and routing them
 -----------------------------------------------------------------------------------------
-
---class FreenetRoutable r where
-  
   
 -- |
 -- A still encrypted, but verified, chunk of data.

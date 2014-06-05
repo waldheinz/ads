@@ -34,7 +34,7 @@ class (FromJSON a, Show a, Eq a) => PeerAddress a where
 data Peer a = Peer
             { peerId          :: ! Id
             , peerAddresses   :: ! (TVar [a]) -- ^ where this peer can be connected
-            , peerSuccessEst  :: ! TEstimator -- ^ estimator for P(success)
+            , peerSuccessEst  :: ! TEstimator -- ^ estimator for P(success) by location
             }
 
 instance Eq (Peer a) where
@@ -43,7 +43,7 @@ instance Eq (Peer a) where
 instance ToJSON a => ToStateJSON (Peer a) where
   toStateJSON (Peer pid adds ps) = do
     adds' <- readTVar adds
-    ps'    <- toStateJSON ps
+    ps'   <- toStateJSON ps
     
     return $ object
       [ "id"        .= pid
@@ -54,7 +54,7 @@ instance ToJSON a => ToStateJSON (Peer a) where
 mkPeer :: PeerAddress a => NodeInfo a -> STM (Peer a)
 mkPeer (NodeInfo nid addrs) = do
   as <- newTVar addrs
-  ps <- mkTEstimator 64 0.5 0.5
+  ps <- mkTEstimator 128 0.01 0.5
   return $ Peer nid as ps
 
 -- |
