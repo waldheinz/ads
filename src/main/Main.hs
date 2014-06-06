@@ -32,6 +32,9 @@ import Types
 logI :: String -> IO ()
 logI = infoM "main"
 
+logW :: String -> IO ()
+logW = warningM "main"
+
 logE :: String -> IO ()
 logE = errorM "main"
 
@@ -92,7 +95,13 @@ main = withSocketsDo $ do
     Just nodeInfo -> do
       logI $ "node identity is " ++ (show $ nodeId nodeInfo)
       node <- mkNode nodeInfo fn
-      readPeers node appDir
+      
+      readPeers appDir >>= \ps ->  case ps of
+        Left  e     -> logW ("error parsing peers file: " ++ e)
+        Right peers -> do
+          logI ("got " ++ show (length peers) ++ " peers")
+          atomically $ mapM_ (mergeNodeInfo node) peers
+
       nodeListen (CFG.subconfig "node.listen" cfg) node
       
       -- start HTTP Server

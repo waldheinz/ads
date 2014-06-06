@@ -5,7 +5,7 @@ module Node (
   -- * our node
   Node, mkNode, readPeers,
   requestNodeData, nodeArchives,
-  nodeFreenet,
+  nodeFreenet, mergeNodeInfo,
 
   nodeRouteStatus, nodeConnectStatus,
   
@@ -16,26 +16,24 @@ module Node (
   nodeFetchChk, nodeFetchSsk
   ) where
 
-import Control.Applicative ( (<$>) )
-import Control.Concurrent ( forkIO, threadDelay )
-import Control.Concurrent.STM as STM
-import Control.Concurrent.STM.TBMQueue as STM
-import Control.Exception.Base ( finally ) 
-import Control.Monad ( forever, unless, void, when )
+import           Control.Applicative ( (<$>) )
+import           Control.Concurrent ( forkIO, threadDelay )
+import           Control.Concurrent.STM as STM
+import           Control.Concurrent.STM.TBMQueue as STM
+import           Control.Exception.Base ( finally )
+import           Control.Monad ( forever, unless, void, when )
 
-import Data.Aeson
+import           Data.Aeson
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Conduit as C
 import qualified Data.Conduit.TQueue as C
-import Data.List ( minimumBy, nub )
 import qualified Data.HashMap.Strict as HMap
-import Data.Maybe ( isJust )
+import           Data.List ( minimumBy, nub )
+import           Data.Maybe ( isJust )
 import qualified Data.Text as T
-import System.FilePath ( (</>) )
-import System.IO.Error ( catchIOError )
-import System.Log.Logger
-import System.Timeout ( timeout )
+import           System.IO.Error ( catchIOError )
+import           System.Log.Logger
+import           System.Timeout ( timeout )
 
 import qualified Freenet as FN
 import qualified Freenet.Archive as FN
@@ -43,20 +41,16 @@ import qualified Freenet.Chk as FN
 import qualified Freenet.Ssk as FN
 import qualified Freenet.Types as FN
 import qualified Freenet.URI as FN
-import Message as MSG
-import Peers
-import Time
-import Types
+import           Message as MSG
+import           Peers
+import           Time
+import           Types
 
 logD :: String -> IO ()
 logD = debugM "node"
 
 logI :: String -> IO ()
 logI = infoM "node"
-
-logW :: String -> IO ()
-logW = warningM "node"
-
 
 -------------------------------------------------------------------------
 -- Node
@@ -282,27 +276,6 @@ nodeRouteStatus node = do
 ----------------------------------------------------------------
 -- the peers list
 ----------------------------------------------------------------
-
-
-readPeers
-  :: (PeerAddress a)
-  => Node a          -- ^ our node
-  -> FilePath        -- ^ app data directory containing the peers file
-  -> IO ()
-readPeers node dataDir = do
-  let
-    kpFile = dataDir </> "peers"
-    
-  logI $ "reading known peers from " ++ kpFile
-  kpbs <- catchIOError
-          (eitherDecode <$> BSL.readFile kpFile)
-          (\e -> return $ Left $ show e)
-  
-  case kpbs of
-    Left  e     -> logW ("error parsing peers file: " ++ e)
-    Right peers -> do
-      logI ("got " ++ show (length peers) ++ " peers")
-      atomically $ mapM_ (mergeNodeInfo node) peers
 
 -- |
 -- Merges the information about some peer with our set of known peers,

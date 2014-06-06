@@ -4,17 +4,24 @@
 module Peers (
   mkNodeInfo,
 
-  PeerAddress(..), 
+  PeerAddress(..), readPeers,
   Peer(..), mkPeer, peerFetchDone
   ) where
 
-import Control.Concurrent.STM
-import Data.Aeson
+import           Control.Concurrent.STM
+import           Data.Aeson
+import qualified Data.ByteString.Lazy as BSL
+import           System.FilePath ( (</>) )
+import           System.IO.Error ( catchIOError )
+import           System.Log.Logger
 
-import Freenet.Types
-import Message
-import Statistics
-import Types
+import           Freenet.Types
+import           Message
+import           Statistics
+import           Types
+
+logI :: String -> IO ()
+logI = infoM "peers"
 
 -- |
 -- Extracts the persistable node information from a peer.
@@ -27,7 +34,7 @@ mkNodeInfo (Peer pid addrs _) = do
 -- Peers
 ----------------------------------------------------------------
 
-class (FromJSON a, Show a, Eq a) => PeerAddress a where
+class (Show a, Eq a) => PeerAddress a where
   connectPeer :: Peer a -> (Either String (MessageIO a) -> IO ()) -> IO ()
   
 -- |
@@ -70,3 +77,15 @@ peerFetchDone peer key suc = updateTEstimator (peerSuccessEst peer) (toLocation 
   where
     suc' = if suc then 1 else 0
     
+readPeers
+  :: (FromJSON a, PeerAddress a)
+  => FilePath        -- ^ app data directory containing the peers file
+  -> IO (Either String [NodeInfo a])
+readPeers dataDir = do
+  let
+    kpFile = dataDir </> "peers"
+    
+  logI $ "reading known peers from " ++ kpFile
+  catchIOError
+    (fmap eitherDecode $ BSL.readFile kpFile)
+    (\e -> return $ Left $ show e)
