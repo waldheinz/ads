@@ -85,10 +85,13 @@ main = withSocketsDo $ do
 
   -- start our node
   case mNodeInfo of
-    Nothing -> logE $ "problem with " ++ infoFile
+    Nothing -> do
+      logE $ "problem with " ++ infoFile
+      shutdownFn fn
+      
     Just nodeInfo -> do
       logI $ "node identity is " ++ (show $ nodeId nodeInfo)
-      node <- mkNode nodeInfo fn tcpConnect 
+      node <- mkNode nodeInfo fn
       readPeers node appDir
       nodeListen (CFG.subconfig "node.listen" cfg) node
       

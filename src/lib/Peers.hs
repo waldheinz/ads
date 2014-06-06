@@ -4,7 +4,7 @@
 module Peers (
   mkNodeInfo,
 
-  PeerAddress, 
+  PeerAddress(..), 
   Peer(..), mkPeer, peerFetchDone
   ) where
 
@@ -12,6 +12,7 @@ import Control.Concurrent.STM
 import Data.Aeson
 
 import Freenet.Types
+import Message
 import Statistics
 import Types
 
@@ -27,7 +28,8 @@ mkNodeInfo (Peer pid addrs _) = do
 ----------------------------------------------------------------
 
 class (FromJSON a, Show a, Eq a) => PeerAddress a where
-
+  connectPeer :: Peer a -> (Either String (MessageIO a) -> IO ()) -> IO ()
+  
 -- |
 -- This is the live version of @NodeInfo@, which can be constructed
 -- from @NodeInfo@ and converted to @NodeInfo@ for storage and transfer.

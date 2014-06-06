@@ -9,9 +9,6 @@ module Node (
 
   nodeRouteStatus, nodeConnectStatus,
   
-  -- * peers
-  ConnectFunction,
-  
   -- * other nodes we're connected to
   PeerNode, runPeerNode,
 
@@ -78,8 +75,8 @@ data Node a = Node
             , nodeSskRequests :: RequestManager FN.SskRequest FN.SskBlock
             }
 
-mkNode :: PeerAddress a => NodeInfo a -> FN.Freenet a -> ConnectFunction a -> IO (Node a)
-mkNode self fn connect = do
+mkNode :: PeerAddress a => NodeInfo a -> FN.Freenet a -> IO (Node a)
+mkNode self fn = do
   peers  <- newTVarIO []
   connecting <- newTVarIO [] -- peers we're currently connecting to
   pns    <- newTVarIO []
@@ -92,7 +89,7 @@ mkNode self fn connect = do
   let
     node = Node peers connecting pns self midgen msgMap fn ac chkRm sskRm
 
-  void $ forkIO $ maintainConnections node connect
+  void $ forkIO $ maintainConnections node
   return node
 
 handlePeerMessages :: PeerAddress a => Node a -> PeerNode a -> Message a -> IO ()
@@ -286,7 +283,6 @@ nodeRouteStatus node = do
 -- the peers list
 ----------------------------------------------------------------
 
-type ConnectFunction a = Peer a -> (Either String (MessageIO a) -> IO ()) -> IO ()
 
 readPeers
   :: (PeerAddress a)
@@ -351,8 +347,8 @@ removePeerNode node pn = do
   where
     dropPreds am = am { amPreds = filter (/= pn) (amPreds am) } -- TODO: some AMs should be re-sent to other peers
 
-maintainConnections :: PeerAddress a => Node a -> ConnectFunction a -> IO ()
-maintainConnections node connect = forever $ do
+maintainConnections :: PeerAddress a => Node a -> IO ()
+maintainConnections node = forever $ do
   -- we simply try to maintain a connection to all known peers for now
   delay <- registerDelay $ 2 * 1000 * 1000 -- limit outgoing connection rate to 2 per second
 
@@ -379,7 +375,7 @@ maintainConnections node connect = forever $ do
                                                 [] -> []
                                                 (p:ps) -> ps ++ [p])
 
-  void $ forkIO $ connect shouldConnect $ \cresult -> do
+  void $ forkIO $ connectPeer shouldConnect $ \cresult -> do
     case cresult of
       Left _      -> atomically $ modifyTVar' (nodeConnecting node) (filter ((/=) shouldConnect))
       Right msgio -> runPeerNode node msgio (Just $ peerId shouldConnect)

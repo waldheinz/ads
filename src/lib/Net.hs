@@ -4,8 +4,7 @@
 -- |
 -- TCP/IP Networking
 module Net (
-  TcpAddress(..),
-  nodeListen, tcpConnect
+  TcpAddress(..), nodeListen
   ) where
 
 import Control.Applicative ( (<$>), (<*>) )
@@ -25,6 +24,7 @@ import Data.Conduit.Serialization.Binary
 import System.IO.Error ( catchIOError )
 
 import Logging
+import Message
 import Node
 import Peers
 
@@ -53,6 +53,7 @@ instance ToJSON TcpAddress where
                             ]
   
 instance PeerAddress TcpAddress where
+  connectPeer = tcpConnect
   
 -- |
 -- listens on the configured addresses and accepts incomping peer connections
@@ -72,7 +73,7 @@ nodeListen cfg node = do
 
 -- |
 -- Connects to a @Peer@ using TCP sockets.
-tcpConnect :: ConnectFunction TcpAddress
+tcpConnect :: Peer TcpAddress -> (Either String (MessageIO TcpAddress) -> IO ()) -> IO ()
 tcpConnect peer handler = do
   addrs <- atomically . readTVar $ peerAddresses peer
   
