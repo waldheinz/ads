@@ -15,6 +15,10 @@ cabal-version:       >=1.10
 data-files:
 	default-config
 
+flag sandbox
+  description: Enable building the sandbox
+  default:     False
+
 library
   hs-source-dirs:      src/lib
   default-language:    Haskell2010
@@ -112,6 +116,20 @@ executable ads
     ads, aeson, base, bytestring, configurator, directory, filepath, network,
     random, stm, unix, warp
   
+executable ads-sandbox
+  hs-source-dirs:   src/sandbox
+  default-language: Haskell2010
+  main-is:          Main.hs
+  ghc-options:      -Wall -threaded
+  
+  if flag(sandbox)
+    buildable:      True
+  else
+    buildable:      False
+
+  build-depends:
+    ads, base, conduit, mtl, random, stm-conduit
+
 test-suite test-ads
   type:
     exitcode-stdio-1.0
