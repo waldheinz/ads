@@ -1,5 +1,9 @@
 language: haskell
+
+srcipt:
+  - cabal configure --enable-tests -f sandbox && cabal build && cabal test
+
 ghc:
-  - 7.6
   - 7.4
+  - 7.6
   - 7.8
