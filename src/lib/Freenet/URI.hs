@@ -4,7 +4,7 @@
 module Freenet.URI (
   URI(..), parseUri,
   isControlDocument, uriPath, uriCryptoKey,
-  appendUriPath, UriFetch(..),
+  appendUriPath,
 
   -- * CHKs
   ChkExtra, mkChkExtra, chkExtraCrypto, chkExtraCompression,
@@ -30,9 +30,6 @@ import Utils
 -----------------------------------------------------------------
 -- inserting / fetching data
 -----------------------------------------------------------------
-
-class UriFetch a where
-  getUriData :: a -> URI -> IO (Either T.Text (BS.ByteString, Int))
 
 data URI
      = CHK

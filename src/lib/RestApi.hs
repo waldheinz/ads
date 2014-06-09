@@ -54,8 +54,8 @@ restApi node = mapUrls $
       (  mount "peers"   (connStatus node)
      <|> mount "routing" (routeStatus node)   
      <|> mount "store"
-        (  mount "chk" (stateJsonResponse $ nodeChkStore node)
-       <|> mount "ssk" (stateJsonResponse $ nodeSskStore node)
+        (--  mount "chk" (stateJsonResponse $ nodeChkStore node)
+--       <|> mount "ssk" (stateJsonResponse $ nodeSskStore node)
         )
       )
     )  

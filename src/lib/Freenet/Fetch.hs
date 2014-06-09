@@ -13,13 +13,19 @@ import qualified Data.HashMap.Strict as Map
 import qualified Data.Text as T
 import System.Log.Logger
 
-import Node
 import Freenet.Archive
 import Freenet.Metadata
 import Freenet.SplitFile
 import Freenet.URI
 import Peers
+import Requests
 import Utils
+
+data Resolver = Resolver
+                { resArchiveCache :: ! ArchiveCache
+                }
+
+--requestNodeData :: 
 
 logI :: String -> IO ()
 logI = infoM "freenet.fetch"

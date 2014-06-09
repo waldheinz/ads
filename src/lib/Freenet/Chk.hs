@@ -4,7 +4,7 @@
 module Freenet.Chk (
   -- * Working with CHKs
   ChkRequest(..), ChkBlock(..), mkChkBlock, decompressChk,
-  encryptChk, ChkInsert(..), chkBlockUri, chkDataSize,
+  encryptChk, chkBlockUri, chkDataSize,
   decryptChk,
 
   -- * CHK Headers
@@ -33,9 +33,6 @@ import qualified Freenet.Rijndael as RD
 import Freenet.Types
 import Freenet.URI
 import Utils
-
-class ChkInsert a where
-  insertChk :: a -> ChkBlock -> IO ()
 
 ------------------------------------------------------------------------------
 -- CHK headers
