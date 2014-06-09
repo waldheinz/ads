@@ -1,12 +1,9 @@
 
 {-# LANGUAGE OverloadedStrings, PackageImports #-}
 
-module Freenet.Store (
+module Store (
   StoreFile, mkStoreFile, shutdownStore,
-  putData, getData,
-  
-  -- * things that go to the store
-  StorePersistable(..)
+  putData, getData  
   ) where
 
 import qualified Control.Concurrent.ReadWriteLock as Lock

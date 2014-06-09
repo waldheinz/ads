@@ -38,7 +38,7 @@ randomNode = do
     ni = NodeInfo nid []
     fn = undefined
 
-  node <- liftIO $ mkNode ni fn
+  node <- liftIO $ mkNode ni fn undefined undefined
   liftIO . putStrLn $ "created node " ++ show nid
   
   return node

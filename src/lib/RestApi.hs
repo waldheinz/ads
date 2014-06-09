@@ -22,7 +22,6 @@ import Network.Wai.Handler.Warp as Warp
 import qualified Network.Wai.Parse as WAI
 import Network.Wai.UrlMap
 
-import Freenet
 import Freenet.Insert
 import Node
 import Peers
@@ -55,8 +54,8 @@ restApi node = mapUrls $
       (  mount "peers"   (connStatus node)
      <|> mount "routing" (routeStatus node)   
      <|> mount "store"
-        (  mount "chk" (stateJsonResponse $ fnChkStore $ nodeFreenet node)
-       <|> mount "ssk" (stateJsonResponse $ fnSskStore $ nodeFreenet node)
+        (  mount "chk" (stateJsonResponse $ nodeChkStore node)
+       <|> mount "ssk" (stateJsonResponse $ nodeSskStore node)
         )
       )
     )  

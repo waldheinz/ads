@@ -30,7 +30,6 @@ import Freenet.Base64
 import Freenet.Compression
 import Freenet.Pcfb
 import qualified Freenet.Rijndael as RD
-import Freenet.Store
 import Freenet.Types
 import Freenet.URI
 import Utils

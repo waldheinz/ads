@@ -8,7 +8,6 @@ import Data.Conduit
 import Data.Conduit.TQueue
 
 import Message
-import Node
 import Peers
 
 type SBMessage = Message NetInterface

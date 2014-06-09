@@ -46,7 +46,6 @@ library
     Freenet.Rijndael,
     Freenet.SplitFile,
     Freenet.Ssk,
-    Freenet.Store,
     Freenet.Types,
     Freenet.URI,
     Logging,
@@ -56,6 +55,7 @@ library
     Peers,
     RestApi,
     Statistics,
+    Store,
     Time,
     Types,
     Utils

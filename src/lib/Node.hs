@@ -6,6 +6,7 @@ module Node (
   Node, mkNode, readPeers,
   requestNodeData, nodeArchives,
   nodeFreenet, mergeNodeInfo,
+  nodeChkStore, nodeSskStore,
 
   nodeRouteStatus, nodeConnectStatus,
   
@@ -43,6 +44,7 @@ import qualified Freenet.Types as FN
 import qualified Freenet.URI as FN
 import           Message as MSG
 import           Peers
+import           Store
 import           Time
 import           Types
 
@@ -67,10 +69,18 @@ data Node a = Node
             , nodeArchives    :: FN.ArchiveCache                                 -- ^ Freenet LRU archive cache
             , nodeChkRequests :: RequestManager FN.ChkRequest FN.ChkBlock
             , nodeSskRequests :: RequestManager FN.SskRequest FN.SskBlock
+            , nodeChkStore    :: StoreFile FN.ChkBlock
+            , nodeSskStore    :: StoreFile FN.SskBlock
             }
 
-mkNode :: PeerAddress a => NodeInfo a -> FN.Freenet a -> IO (Node a)
-mkNode self fn = do
+mkNode
+  :: PeerAddress a
+  => NodeInfo a
+  -> FN.Freenet a
+  -> StoreFile FN.ChkBlock
+  -> StoreFile FN.SskBlock
+  -> IO (Node a)
+mkNode self fn chkStore sskStore = do
   peers  <- newTVarIO []
   connecting <- newTVarIO [] -- peers we're currently connecting to
   pns    <- newTVarIO []
@@ -81,7 +91,7 @@ mkNode self fn = do
   sskRm  <- atomically mkRequestManager
 
   let
-    node = Node peers connecting pns self midgen msgMap fn ac chkRm sskRm
+    node = Node peers connecting pns self midgen msgMap fn ac chkRm sskRm chkStore sskStore
 
   void $ forkIO $ maintainConnections node
   return node

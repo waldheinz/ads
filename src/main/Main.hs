@@ -10,6 +10,7 @@ import Control.Monad ( unless, void )
 import qualified Data.Aeson as JSON
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
+import qualified Data.Configurator.Types as CFG
 import Network ( withSocketsDo )
 import Network.Wai.Handler.Warp as Warp
 import System.Directory ( createDirectoryIfMissing, doesFileExist, getAppUserDataDirectory )
@@ -21,12 +22,15 @@ import System.Random ( getStdRandom )
 import Paths_ads
 
 import Freenet as FN
+import Freenet.Chk
 import Freenet.Fproxy as FP
 import Freenet.Rijndael as RD
+import Freenet.Ssk
 import Logging as LOG
 import Net
 import Node
 import RestApi
+import Store
 import Types
 
 logI :: String -> IO ()
@@ -42,14 +46,29 @@ sigHandler :: TVar Bool -> IO ()
 sigHandler s = do
   infoM "main" "shutdown on sigint/sigterm"
   atomically $ writeTVar s True
+  
+  
+mkFileStore :: CFG.Config -> IO (StoreFile ChkBlock, StoreFile SskBlock)
+mkFileStore cfg = do
+    -- datastore
+  dsdir       <- CFG.require cfg "datastore.directory"
+  createDirectoryIfMissing True dsdir
+  
+  chkCount    <- CFG.require cfg "datastore.chk-count"
+  chkStore    <- mkStoreFile (undefined :: ChkBlock) (dsdir </> "store-chk") chkCount
 
+  sskCount    <- CFG.require cfg "datastore.ssk-count"
+  sskStore    <- mkStoreFile (undefined :: SskBlock) (dsdir </> "store-ssk") sskCount
+
+  return (chkStore, sskStore)
+  
 main :: IO ()
 main = withSocketsDo $ do
   infoM "main" "Starting up..."
   
   RD.initRijndael
 
-  -- find and maybe create out home directory
+  -- find and maybe create home directory
   args <- getArgs
   appDir <- if null args then getAppUserDataDirectory "ads" else return (head args)
   createDirectoryIfMissing True appDir
@@ -83,18 +102,27 @@ main = withSocketsDo $ do
       BSL.writeFile infoFile $ JSON.encode result
       return $ Just result
 
+  let fnCfg = CFG.subconfig "freenet" cfg
+  
   -- start Freenet
-  fn <- FN.initFn $ CFG.subconfig "freenet" cfg
+  fn <- FN.initFn fnCfg
+  (chks, ssks) <- mkFileStore fnCfg
+
+  let
+    shutdownStores :: IO ()
+    shutdownStores  = do
+      shutdownStore chks
+      shutdownStore ssks
 
   -- start our node
   case mNodeInfo of
     Nothing -> do
       logE $ "problem with " ++ infoFile
-      shutdownFn fn
+      shutdownStores
       
     Just nodeInfo -> do
       logI $ "node identity is " ++ (show $ nodeId nodeInfo)
-      node <- mkNode nodeInfo fn
+      node <- mkNode nodeInfo fn chks ssks
       
       readPeers appDir >>= \ps ->  case ps of
         Left  e     -> logW ("error parsing peers file: " ++ e)
@@ -115,5 +143,4 @@ main = withSocketsDo $ do
 
       -- wait for shutdown
       atomically $ readTVar shutdown >>= check
-
-      shutdownFn fn
+      shutdownStores

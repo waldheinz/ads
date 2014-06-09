@@ -2,8 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Freenet (
-  Freenet, initFn, shutdownFn,
-  fnChkStore, fnSskStore,
+  Freenet, initFn,
   getChk, getSsk,
   offerChk, offerSsk
   ) where
@@ -14,19 +13,14 @@ import Control.Monad ( void )
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
 import qualified Data.Text as T
-import System.Directory ( createDirectoryIfMissing )
-import System.FilePath ( (</>) )
 
 import Freenet.Chk
 import qualified Freenet.Companion as FC
 import Freenet.Ssk
-import qualified Freenet.Store as FS
 import Freenet.Types
 
 data Freenet a = FN
-               { fnChkStore    :: FS.StoreFile ChkBlock
-               , fnSskStore    :: FS.StoreFile SskBlock
-               , fnCompanion   :: Maybe FC.Companion
+               { fnCompanion   :: Maybe FC.Companion
                , fnIncomingChk :: TChan ChkBlock
                , fnIncomingSsk :: TChan SskBlock
                }
@@ -34,20 +28,11 @@ data Freenet a = FN
 -- | initializes Freenet subsystem
 initFn :: CFG.Config -> IO (Freenet a)
 initFn cfg = do
-  -- datastore
-  dsdir       <- CFG.require cfg "datastore.directory"
-  createDirectoryIfMissing True dsdir
-  
-  chkCount    <- CFG.require cfg "datastore.chk-count"
-  chkStore    <- FS.mkStoreFile (undefined :: ChkBlock) (dsdir </> "store-chk") chkCount
-
-  sskCount    <- CFG.require cfg "datastore.ssk-count"
-  sskStore    <- FS.mkStoreFile (undefined :: SskBlock) (dsdir </> "store-ssk") sskCount
   
   chkIncoming <- newBroadcastTChanIO
   sskIncoming <- newBroadcastTChanIO
   
-  let fn = FN chkStore sskStore Nothing chkIncoming sskIncoming
+  let fn = FN Nothing chkIncoming sskIncoming
 
   -- companion
   let ccfg = CFG.subconfig "companion" cfg
@@ -57,20 +42,13 @@ initFn cfg = do
     Just _  -> do
       comp <- FC.initCompanion ccfg (offerChk fn) (offerSsk fn)
       return $ fn { fnCompanion = Just comp }
-
-shutdownFn :: Freenet a -> IO ()
-shutdownFn fn = do
-  FS.shutdownStore $ fnChkStore fn
-  FS.shutdownStore $ fnSskStore fn
   
 offerSsk :: Freenet a -> SskBlock -> IO ()
 offerSsk fn df = do
-  FS.putData (fnSskStore fn) df
   atomically $ writeTChan (fnIncomingSsk fn) df
 
 offerChk :: Freenet a -> ChkBlock -> IO ()
 offerChk fn df = do
-  FS.putData (fnChkStore fn) df
   atomically $ writeTChan (fnIncomingChk fn) df
 
 waitKeyTimeout :: DataBlock f => TChan f -> Key -> IO (TMVar (Maybe f))
@@ -95,36 +73,26 @@ waitKeyTimeout chan loc = do
 -- companion. Might block quite some time if the companion
 -- is involved.
 getChk :: Freenet a -> ChkRequest -> IO (Either T.Text ChkBlock)
-getChk fn dr = do
-  fromStore <- FS.getData (fnChkStore fn) (dataRequestLocation dr)
+getChk fn dr = case fnCompanion fn of
+  Nothing -> return $ Left "not in store, no companion"
+  Just c  -> do
+    bucket <- waitKeyTimeout (fnIncomingChk fn) (dataRequestLocation dr)
+    FC.getChk c dr
+    md <- atomically $ readTMVar bucket
   
-  case fromStore of
-    Just blk -> return $ Right blk
-    Nothing -> case fnCompanion fn of
-        Nothing -> return $ Left "not in store, no companion"
-        Just c  -> do
-          bucket <- waitKeyTimeout (fnIncomingChk fn) (dataRequestLocation dr)
-          FC.getChk c dr
-          md <- atomically $ readTMVar bucket
-  
-          return $ case md of
-            Nothing -> Left "timeout waiting for companion"
-            Just d  -> Right d
+    return $ case md of
+      Nothing -> Left "timeout waiting for companion"
+      Just d  -> Right d
 
 getSsk :: Freenet a -> SskRequest -> IO (Either T.Text SskBlock)
-getSsk fn dr = do
-  fromStore <- FS.getData (fnSskStore fn) (dataRequestLocation dr)
-  
-  case fromStore of
-    Just blk -> return $ Right blk
-    Nothing -> case fnCompanion fn of
-        Nothing -> return $ Left "not in store, no companion"
-        Just c  -> do
-          bucket <- waitKeyTimeout (fnIncomingSsk fn) (dataRequestLocation dr)
-          FC.getSsk c dr
-          md <- atomically $ readTMVar bucket
-  
-          return $ case md of
-            Nothing -> Left "timeout waiting for companion"
-            Just d  -> Right d
+getSsk fn dr = case fnCompanion fn of
+  Nothing -> return $ Left "not in store, no companion"
+  Just c  -> do
+    bucket <- waitKeyTimeout (fnIncomingSsk fn) (dataRequestLocation dr)
+    FC.getSsk c dr
+    md <- atomically $ readTMVar bucket
+    
+    return $ case md of
+      Nothing -> Left "timeout waiting for companion"
+      Just d  -> Right d
 

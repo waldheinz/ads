@@ -11,7 +11,7 @@ module Types (
   LocDistance, unDistance, locDist, absLocDist, scaleDist, locMove,
   
   -- * state aware serialization
-  ToStateJSON(..),
+  ToStateJSON(..)
   ) where
 
 import Control.Applicative ( pure, (<$>), (<*>) )
