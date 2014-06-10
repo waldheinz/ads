@@ -8,15 +8,24 @@ module Requests (
   
   ) where
 
-import Control.Concurrent.STM
+import           Control.Concurrent ( forkIO )
+import           Control.Concurrent.STM
+import           Control.Monad ( void, when )
+import qualified Data.ByteString as BS
+import qualified Data.HashMap.Strict as HMap
+import qualified Data.Text as T
 
+import qualified Freenet.Chk as FN
 import qualified Freenet.Ssk as FN
 import qualified Freenet.Types as FN
-import Message
-import Node
+import qualified Freenet.URI as FN
+import           Message
+import           Node
 
 class UriFetch a where
-  getUriData :: a -> URI -> IO (Either T.Text (BS.ByteString, Int))
+  getUriData :: a -> FN.URI -> IO (Either T.Text (BS.ByteString, Int))
+
+
 
 -------------------------------------------------------------------------------------------------
 -- Organizing data requests
@@ -81,7 +90,7 @@ request rmgr dr act = do
 ------------------------------------------------------------------------------------------
 -- fetching data
 ------------------------------------------------------------------------------------------
-
+{-
 nodeFetchChk :: PeerAddress a => Node a -> FN.ChkRequest -> ((Either T.Text FN.ChkBlock) -> IO b) -> IO b
 nodeFetchChk node req k = do
   fromStore <- FN.getChk (nodeFreenet node) req
@@ -168,3 +177,4 @@ requestNodeData n (FN.USK pkh key extra dn dr _) = do
         Nothing  -> return $ Left "timeout waiting for USK data"
         Just blk -> return $ decrypt blk
 
+-}

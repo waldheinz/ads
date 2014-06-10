@@ -17,6 +17,7 @@ import Freenet.Chk
 import Freenet.Metadata
 import Freenet.Types
 import Freenet.URI
+import Requests
 import Utils
 
 data InsertTarget
@@ -47,8 +48,8 @@ packChk d
   where
     key = mkKey' $ bsToStrict $ bytestringDigest $ sha256 d
 
-insert :: ChkInsert a => a -> InsertTarget -> InsertData -> IO InsertProgress
-insert ins InsertCHK (InsertDirect payload mime) = do
+insert :: a -> InsertTarget -> InsertData -> IO InsertProgress
+insert _ InsertCHK (InsertDirect payload mime) = do
   let
     (blks, hash)  = packChk payload
     duri          = chkBlockUri (head blks) (mkKey' hash)
@@ -57,6 +58,7 @@ insert ins InsertCHK (InsertDirect payload mime) = do
     mduri         = CHK (chkBlockKey $ head mdblks) (mkKey' mdh) (mkChkExtra 3 (-1) True) []
     ip            = IP (blks ++ mdblks) mduri
     
-  void $ forkIO $ mapM_ (insertChk ins) (chkTodo ip)
+--  void $ forkIO $ mapM_ (insertChk ins) (chkTodo ip)
+  error "Insert.insert is not implemented"
   return ip
   

@@ -5,28 +5,28 @@ module RestApi (
   startRestApi
   ) where
 
-import Control.Applicative ( (<|>), (<$>) )
-import Control.Concurrent ( forkIO )
-import Control.Concurrent.STM
-import Control.Monad ( void )
-import Data.Aeson
+import           Control.Applicative ( (<|>), (<$>) )
+import           Control.Concurrent ( forkIO )
+import           Control.Concurrent.STM
+import           Control.Monad ( void )
+import           Data.Aeson
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
-import Data.String ( fromString )
+import           Data.String ( fromString )
 import qualified Data.Text as T
-import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
-import Network.HTTP.Types ( status200, status400 )
+import           Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
+import           Network.HTTP.Types ( status200, status400 )
 import qualified Network.Wai as WAI
-import Network.Wai.Application.Static
-import Network.Wai.Handler.Warp as Warp
+import           Network.Wai.Application.Static
+import           Network.Wai.Handler.Warp as Warp
 import qualified Network.Wai.Parse as WAI
-import Network.Wai.UrlMap
+import           Network.Wai.UrlMap
 
-import Freenet.Insert
-import Node
-import Peers
-import Types
-import Utils
+import           Freenet.Insert
+import           Node
+import           Peers
+import           Types
+import           Utils
 
 startRestApi :: (PeerAddress a, ToJSON a) => CFG.Config -> Node a -> IO ()
 startRestApi cfg node = do
@@ -105,12 +105,6 @@ fetchSsk node req = do
         Left e    -> badRequest e req
         Right blk -> jsonResponse blk req
 
---insertBackend :: Node a -> WAI.BackEnd (Sink 
---insertBackend node pn fi = do
---  (bsrc, bsink) <- liftIO $ CU.pairTQueue
---  prog <- liftIO $ void $ liftIO $ insert InsertCHK (InsertDirect bsrc (decodeUtf8 $ WAI.fileContentType fi))
---  return bsink
-        
 insertFile :: PeerAddress a => Node a -> WAI.Application
 insertFile node req = do
   case WAI.getRequestBodyType req of
