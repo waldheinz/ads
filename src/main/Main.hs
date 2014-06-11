@@ -122,7 +122,7 @@ main = withSocketsDo $ do
       
     Just nodeInfo -> do
       logI $ "node identity is " ++ (show $ nodeId nodeInfo)
-      node <- mkNode nodeInfo fn chks ssks
+      node <- mkNode nodeInfo fn
       
       readPeers appDir >>= \ps ->  case ps of
         Left  e     -> logW ("error parsing peers file: " ++ e)
@@ -136,10 +136,10 @@ main = withSocketsDo $ do
       startRestApi (CFG.subconfig "node.http" cfg) node
       
       -- start fproxy
-      fpport <- CFG.lookup cfg "fproxy.port"
+      fpport <- CFG.lookup cfg "fproxy.port" :: IO (Maybe Int)
       case fpport of
         Nothing -> return ()
-        Just p -> void $ forkIO $ Warp.run p $ FP.fproxy node
+        Just p -> error "need resolver for fproxy" -- void $ forkIO $ Warp.run p $ FP.fproxy node
 
       -- wait for shutdown
       atomically $ readTVar shutdown >>= check

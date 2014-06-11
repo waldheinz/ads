@@ -43,20 +43,20 @@ startRestApi cfg node = do
 restApi :: (PeerAddress a, ToJSON a) => Node a -> WAI.Application
 restApi node = mapUrls $
   mount "api"
-    ( mount "fetch"
-     (  mount "chk" (fetchChk node)
-    <|> mount "ssk" (fetchSsk node)   
-     )
-   <|> mount "insert"
+    (-- mount "fetch"
+--     (  mount "chk" (fetchChk node)
+--    <|> mount "ssk" (fetchSsk node)   
+--     )
+   mount "insert"
       ( mount "file" (insertFile node)
       )  
    <|> mount "status"
       (  mount "peers"   (connStatus node)
      <|> mount "routing" (routeStatus node)   
-     <|> mount "store"
-        (--  mount "chk" (stateJsonResponse $ nodeChkStore node)
+--     <|> mount "store"
+--        (  mount "chk" (stateJsonResponse $ nodeChkStore node)
 --       <|> mount "ssk" (stateJsonResponse $ nodeSskStore node)
-        )
+--        )
       )
     )  
  <|> mountRoot webUi
@@ -82,7 +82,8 @@ badRequest :: T.Text -> WAI.Application
 badRequest msg _ = return $ WAI.responseLBS status400 headers $ bsFromStrict $ encodeUtf8 msg
   where
     headers = [("Content-Type", "text/plain; charset=utf-8")]
-
+    
+{-
 fetchChk :: PeerAddress a => Node a -> WAI.Application
 fetchChk node req = do
   chkReq <- eitherDecode <$> WAI.lazyRequestBody req
@@ -104,6 +105,7 @@ fetchSsk node req = do
       case result of
         Left e    -> badRequest e req
         Right blk -> jsonResponse blk req
+-}
 
 insertFile :: PeerAddress a => Node a -> WAI.Application
 insertFile node req = do

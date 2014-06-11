@@ -5,7 +5,7 @@
 -- High level data fetching. This includes splitfile reassembly,
 -- handling of archives and retries.
 module Freenet.Fetch (
-  fetchUri
+  Resolver, fetchUri
   ) where
 
 import qualified Data.ByteString.Lazy as BSL
@@ -17,15 +17,13 @@ import Freenet.Archive
 import Freenet.Metadata
 import Freenet.SplitFile
 import Freenet.URI
-import Peers
 import Requests
 import Utils
 
-data Resolver = Resolver
+data Resolver f = Resolver
                 { resArchiveCache :: ! ArchiveCache
+                , resFetch        :: f
                 }
-
---requestNodeData :: 
 
 logI :: String -> IO ()
 logI = infoM "freenet.fetch"
@@ -37,11 +35,11 @@ logD = debugM "freenet.fetch"
 -- Tries to fetch the specified URI, parses metadata if it's
 -- a control document, goes on fetching the referenced data,
 -- and finally returns everything
-fetchUri :: PeerAddress a => Node a -> URI -> IO (Either T.Text BSL.ByteString)
-fetchUri fn uri = do
+fetchUri :: UriFetch f => Resolver f -> URI -> IO (Either T.Text BSL.ByteString)
+fetchUri res uri = do
   logI $ "fetching " ++ show uri
   
-  db <- requestNodeData fn uri
+  db <- getUriData (resFetch res) uri
   
   case db of
     Left e  -> return $ Left e
@@ -49,20 +47,20 @@ fetchUri fn uri = do
                        in if isControlDocument uri
                           then case parseMetadata pt' of
                             Left e   -> return $ Left e
-                            Right md -> resolvePath fn (uriPath uri) md Nothing
+                            Right md -> resolvePath res (uriPath uri) md Nothing
                           else return $ Right pt'
 
 -- | FIXME: watch out for infinite redirects
 resolvePath
-  :: PeerAddress a
-  => Node a
+  :: UriFetch f
+  => Resolver f
   -> [T.Text]                          -- ^ path elements to be resolved
   -> Metadata                    -- ^ the metadata where we try to locate the entries in
   -> Maybe Archive                     -- ^ archive to resolve AIR etc. against
   -> IO (Either T.Text BSL.ByteString) -- ^ either we fail, or we locate the final redirect step
 
 -- redirect to default entry in manifest, which has a name of ""
-resolvePath fn [] md@(Manifest _) arch = logI "redirecting to default entry" >> resolvePath fn [""] md arch
+resolvePath res [] md@(Manifest _) arch = logI "redirecting to default entry" >> resolvePath res [""] md arch
 
 -- resolve in archive
 resolvePath _ _ (ArchiveInternalRedirect tgt _) (Just amap) = do
@@ -84,7 +82,7 @@ resolvePath fn ps (ArchiveMetadataRedirect tgt) (Just archive) =
 resolvePath fn ps (SimpleRedirect _ (RedirectKey _ uri)) arch = do
   logD $ "following simple (key) redirect to " ++ show uri ++ " for " ++ show ps
   
-  db <- requestNodeData fn uri
+  db <- getUriData (resFetch fn) uri
 
   case db of
     Left e  -> return $ Left $ "failed to fetch data while following key redirect: " `T.append` e
@@ -95,7 +93,7 @@ resolvePath fn ps (SimpleRedirect _ (RedirectKey _ uri)) arch = do
                             Right md -> resolvePath fn (uriPath uri ++ ps) md arch
                           else return $ Right pt'
 
-resolvePath fn [] (SimpleRedirect _ (RedirectSplitFile sf)) _ = fetchSplitFile fn sf
+resolvePath fn [] (SimpleRedirect _ (RedirectSplitFile sf)) _ = fetchSplitFile (resFetch fn) sf
 
 -- resolve path in manifest
 resolvePath fn (p:ps) md@(Manifest me) arch = do
@@ -112,7 +110,7 @@ resolvePath fn (p:ps) md@(Manifest me) arch = do
 resolvePath fn ps (ArchiveManifest atgt atype _ _) _ = do
   logD $ "resolving archive manifest " ++ show atgt
   
-  arch <- fetchArchive fn (nodeArchives fn) atgt atype
+  arch <- fetchArchive (resFetch fn) (resArchiveCache fn) atgt atype
   
   case arch of
     Left e -> return $ Left e
@@ -126,7 +124,7 @@ resolvePath fn ps (ArchiveManifest atgt atype _ _) _ = do
           x        -> return $ Left $ "error parsing manifest from TAR archive: " `T.append` T.pack (show x)
 
 resolvePath fn ps (MultiLevel sf) arch = do
-  sfc <- fetchSplitFile fn sf
+  sfc <- fetchSplitFile (resFetch fn) sf
 
   case sfc of
     Left e   -> return $ Left $ "error fetching splitfile for MultiLevel metadata: " `T.append` e
