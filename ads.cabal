@@ -100,10 +100,10 @@ library
     unordered-containers >= 0.2,
     vector               >= 0.10,
     void                 >= 0.6,
-    wai                  >= 2.1,
-    wai-app-static       >= 2.0,
-    wai-extra            >= 2.1,
-    warp                 >= 2.1,
+    wai                  >= 3.0,
+    wai-app-static       >= 3.0,
+    wai-extra            >= 3.0,
+    warp                 >= 3.0,
     zip-archive          >= 0.2,
     zlib                 >= 0.5
 

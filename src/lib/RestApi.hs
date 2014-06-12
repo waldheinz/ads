@@ -65,21 +65,22 @@ webUi :: WAI.Application
 webUi = staticApp $ defaultFileServerSettings "./webUi"
   
 connStatus :: ToJSON a => Node a -> WAI.Application
-connStatus n r = nodeConnectStatus n >>= \o -> jsonResponse o r
+connStatus n r resp = nodeConnectStatus n >>= \o -> jsonResponse o r resp
 
 routeStatus :: ToJSON a => Node a -> WAI.Application
-routeStatus n r = nodeRouteStatus n >>= \o -> jsonResponse o r
+routeStatus n r resp = nodeRouteStatus n >>= \o -> jsonResponse o r resp
 
 stateJsonResponse :: ToStateJSON a => a -> WAI.Application
-stateJsonResponse o req = atomically (toStateJSON o) >>= \o' -> jsonResponse o' req
+stateJsonResponse o req respond =
+  atomically (toStateJSON o) >>= \o' -> jsonResponse o' req respond
 
 jsonResponse :: ToJSON a => a -> WAI.Application
-jsonResponse o _ = return $ WAI.responseLBS status200 headers $ encode o
+jsonResponse o _ respond = respond $ WAI.responseLBS status200 headers $ encode o
   where
     headers = [("Content-Type", "application/json")]
 
 badRequest :: T.Text -> WAI.Application
-badRequest msg _ = return $ WAI.responseLBS status400 headers $ bsFromStrict $ encodeUtf8 msg
+badRequest msg _ respond = respond $ WAI.responseLBS status400 headers $ bsFromStrict $ encodeUtf8 msg
   where
     headers = [("Content-Type", "text/plain; charset=utf-8")]
     
@@ -108,11 +109,11 @@ fetchSsk node req = do
 -}
 
 insertFile :: PeerAddress a => Node a -> WAI.Application
-insertFile node req = do
+insertFile node req respond = do
   case WAI.getRequestBodyType req of
-    Nothing -> badRequest "must post url encoded or multipart data here" req
-    Just _ -> do
+    Nothing -> badRequest "must post url encoded or multipart data here" req respond
+    Just _  -> do
       (_, files) <- WAI.parseRequestBody WAI.lbsBackEnd req
       uris <- mapM (\(_, fi) -> insert node InsertCHK (InsertDirect (WAI.fileContent fi) (decodeUtf8 $ WAI.fileContentType fi))) files
-      badRequest (T.pack $ show uris) req
+      badRequest (T.pack $ show uris) req respond
       
