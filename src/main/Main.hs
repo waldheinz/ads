@@ -122,7 +122,7 @@ main = withSocketsDo $ do
       
     Just nodeInfo -> do
       logI $ "node identity is " ++ (show $ nodeId nodeInfo)
-      node <- mkNode nodeInfo fn
+      node <- mkNode nodeInfo
       
       readPeers appDir >>= \ps ->  case ps of
         Left  e     -> logW ("error parsing peers file: " ++ e)

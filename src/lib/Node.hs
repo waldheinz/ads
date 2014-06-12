@@ -4,7 +4,7 @@
 module Node (
   -- * our node
   Node, mkNode, readPeers,
-  nodeFreenet, mergeNodeInfo,
+  mergeNodeInfo,
   nodeRouteStatus, nodeConnectStatus,
   mkRoutedMessage,
   
@@ -30,7 +30,6 @@ import           System.IO.Error ( catchIOError )
 import           System.Log.Logger
 import           System.Timeout ( timeout )
 
-import qualified Freenet as FN
 import qualified Freenet.Types as FN
 import           Message as MSG
 import           Peers
@@ -54,15 +53,13 @@ data Node a = Node
             , nodeIdentity    :: NodeInfo a                                      -- ^ our identity
             , nodeMidGen      :: MessageIdGen                                    -- ^ message id generator
             , nodeActMsgs     :: TVar (HMap.HashMap MessageId (ActiveMessage a)) -- ^ messages we're currently routing
-            , nodeFreenet     :: FN.Freenet a                                    -- ^ our freenet compatibility layer
             }
 
 mkNode
   :: PeerAddress a
   => NodeInfo a
-  -> FN.Freenet a
   -> IO (Node a)
-mkNode self fn = do
+mkNode self = do
   peers  <- newTVarIO []
   connecting <- newTVarIO [] -- peers we're currently connecting to
   pns    <- newTVarIO []
@@ -70,7 +67,7 @@ mkNode self fn = do
   msgMap <- newTVarIO HMap.empty
 
   let
-    node = Node peers connecting pns self midgen msgMap fn
+    node = Node peers connecting pns self midgen msgMap
 
   void $ forkIO $ maintainConnections node
   return node
@@ -86,11 +83,12 @@ handlePeerMessages node _  (Direct (PeerList ps)) = do
   logD $ "got some peers: " ++ show ps
   atomically $ mapM_ (mergeNodeInfo node) ps
   
-handlePeerMessages node pn msg = do
+handlePeerMessages _ _ _ = return ()
+{-
   let
     fn = nodeFreenet node
     peer = pnPeer pn
-    
+
     route = void $ forkIO $ case msg of
       Routed False rm@(RoutedMessage (FreenetChkRequest req) mid _ _) -> do
         local <- FN.getChk fn req
@@ -116,7 +114,7 @@ handlePeerMessages node pn msg = do
                             \lm -> logD $ "routed " ++ show mid ++ ": " ++ show lm
 
       _ -> return ()
-{-      
+
     writeStores = case msg of
       Response _ (FreenetChkBlock blk) -> do
         atomically $ offer blk (nodeChkRequests node)
@@ -127,9 +125,8 @@ handlePeerMessages node pn msg = do
         FN.offerSsk (nodeFreenet node) blk
       _   -> return ()
     
-  writeStores >>
+  writeStores >> route
 -}
-  route
 
 -----------------------------------------------------------------------------------------------
 -- Routing

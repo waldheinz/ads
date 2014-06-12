@@ -12,7 +12,6 @@ import Control.Monad.RWS.Strict
 import System.Random ( StdGen, mkStdGen )
 
 import Node
-import Peers
 import Types
 
 import Network
@@ -36,9 +35,8 @@ randomNode = do
   nid <- get >>= \s -> let (i, g') = randomId (stRng s) in put s { stRng = g' } >> return i
   let
     ni = NodeInfo nid []
-    fn = undefined
 
-  node <- liftIO $ mkNode ni fn
+  node <- liftIO $ mkNode ni
   liftIO . putStrLn $ "created node " ++ show nid
   
   return node
