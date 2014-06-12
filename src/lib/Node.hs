@@ -3,13 +3,10 @@
 
 module Node (
   -- * our node
-  Node, mkNode, readPeers,
+  Node, mkNode, nodeIdentity, 
   mergeNodeInfo,
   nodeRouteStatus, nodeConnectStatus,
-  mkRoutedMessage,
-  
-  -- * other nodes we're connected to
-  PeerNode, runPeerNode
+  mkRoutedMessage, peerConnecting
   ) where
 
 import           Control.Applicative ( (<$>) )
@@ -46,13 +43,15 @@ logI = infoM "node"
 -- Node
 -------------------------------------------------------------------------
 
+type MessageMap a = TVar (HMap.HashMap MessageId (ActiveMessage a))
+
 data Node a = Node
-            { nodePeers       :: TVar [Peer a]                                   -- ^ the peers we know about
-            , nodeConnecting  :: TVar [Peer a]                                   -- ^ peers we're currently connecting to
-            , nodePeerNodes   :: TVar [PeerNode a]                               -- ^ the nodes we're connected to
-            , nodeIdentity    :: NodeInfo a                                      -- ^ our identity
-            , nodeMidGen      :: MessageIdGen                                    -- ^ message id generator
-            , nodeActMsgs     :: TVar (HMap.HashMap MessageId (ActiveMessage a)) -- ^ messages we're currently routing
+            { nodePeers       :: TVar [Peer a]     -- ^ the peers we know about
+            , nodeConnecting  :: TVar [Peer a]     -- ^ peers we're currently connecting to
+            , nodePeerNodes   :: TVar [PeerNode a] -- ^ the nodes we're connected to
+            , nodeIdentity    :: TVar (NodeInfo a) -- ^ our identity
+            , nodeMidGen      :: MessageIdGen      -- ^ message id generator
+            , nodeActMsgs     :: MessageMap a      -- ^ messages we're currently routing
             }
 
 mkNode
@@ -61,16 +60,20 @@ mkNode
   -> IO (Node a)
 mkNode self = do
   peers  <- newTVarIO []
-  connecting <- newTVarIO [] -- peers we're currently connecting to
+  cting  <- newTVarIO []
   pns    <- newTVarIO []
   midgen <- mkMessageIdGen
   msgMap <- newTVarIO HMap.empty
-
+  myId   <- newTVarIO self
+  
   let
-    node = Node peers connecting pns self midgen msgMap
+    node = Node peers cting pns myId midgen msgMap
 
   void $ forkIO $ maintainConnections node
   return node
+
+readNodeIdentity :: Node a -> STM (NodeInfo a)
+readNodeIdentity = readTVar . nodeIdentity
 
 handlePeerMessages :: PeerAddress a => Node a -> PeerNode a -> Message a -> IO ()
 handlePeerMessages _ pn (Direct Ping) = logD $ "ping from " ++ show pn
@@ -174,9 +177,9 @@ sendRoutedMessage node msg prev = do
   logMsg <- atomically $ do
     amMap      <- readTVar $ nodeActMsgs node
     neighbours <- readTVar $ nodePeerNodes node
-
+    myId       <- nodeId <$> readNodeIdentity node
+    
     let
-      myId      = nodeId $ nodeIdentity node
       tgt       = toLocation $ (routeTarget msg :: Id)
       nLoc      = peerId . pnPeer
       notMarked = filter (\n -> not $ msg `routeMarked` (nLoc n)) neighbours
@@ -270,8 +273,8 @@ nodeRouteStatus node = do
 -- adding new ones or just updating addresses of the ones we already
 -- know about.
 mergeNodeInfo :: PeerAddress a => Node a -> NodeInfo a -> STM ()
-mergeNodeInfo node ni = unless (nodeId ni == (nodeId . nodeIdentity) node) $ do
-  p   <- mkPeer ni
+mergeNodeInfo node ni = readNodeIdentity node >>= \myid -> unless (nodeId ni == nodeId myid) $ do
+  p <- mkPeer ni
 
   let
     merge (Peer _ av1 _) (Peer _ av2 _) = do
@@ -385,9 +388,20 @@ enqMessage n = writeTBMQueue (pnQueue n)
 -- Handshake
 ------------------------------------------------------------------------------
 
--- ^ handle a node that is currently connected to us
+-- |
+-- Offers an incoming connection from a peer to our node to deal with. This
+-- will be ultimately called upon an incoming TCP connection or similar.
+peerConnecting
+  :: PeerAddress a
+  => Node a        -- ^ our node
+  -> MessageIO a   -- ^ the @MessageIO@ interface of the connecting peer
+  -> IO ()
+peerConnecting node io = runPeerNode node io Nothing
+
+-- |
+-- handle a node that is currently connected to us
 runPeerNode
-  :: (PeerAddress a)
+  :: PeerAddress a
   => Node a
   -> MessageIO a    -- ^ the (source, sink) pair to talk to the peer
   -> Maybe Id
@@ -436,7 +450,8 @@ runPeerNode node (src, sink) expected = do
           Nothing -> addPeerNode node pn >>= \ea -> case ea of
             Just e' -> return $ Left e'
             Nothing -> do
-              unless (isJust expected) (enqDirect $ Hello $ nodeIdentity node)
+              myid <- readNodeIdentity node
+              unless (isJust expected) (enqDirect $ Hello myid)
               enqDirect GetPeerList
               return $ Right pn
 
@@ -461,7 +476,8 @@ runPeerNode node (src, sink) expected = do
     (C.sourceTBMQueue outq) C.$$ sink
 
   -- enqueue the obligatory Hello message, if this is an outgoing connection
-  when (isJust expected) $ atomically . enqDirect $ Hello $ nodeIdentity node
+  when (isJust expected) $ atomically $ 
+    readNodeIdentity node >>= enqDirect . Hello
   
   -- wait for peer's hello (or timeout)
   mnode <- timeout (5 * 1000 * 1000) $ do

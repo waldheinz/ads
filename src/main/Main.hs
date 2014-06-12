@@ -3,35 +3,36 @@
 
 module Main ( main ) where
 
-import Control.Applicative ( (<$>) )
-import Control.Concurrent ( forkIO )
-import Control.Concurrent.STM
-import Control.Monad ( unless, void )
+import           Control.Applicative ( (<$>) )
+import           Control.Concurrent ( forkIO )
+import           Control.Concurrent.STM
+import           Control.Monad ( unless, void )
 import qualified Data.Aeson as JSON
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Configurator as CFG
 import qualified Data.Configurator.Types as CFG
-import Network ( withSocketsDo )
-import Network.Wai.Handler.Warp as Warp
-import System.Directory ( createDirectoryIfMissing, doesFileExist, getAppUserDataDirectory )
-import System.Environment ( getArgs )
-import System.FilePath ( (</>) )
-import System.Posix.Signals (installHandler, Handler(Catch), sigINT, sigTERM)
-import System.Random ( getStdRandom )
+import           Network ( withSocketsDo )
+import           Network.Wai.Handler.Warp as Warp
+import           System.Directory ( createDirectoryIfMissing, doesFileExist, getAppUserDataDirectory )
+import           System.Environment ( getArgs )
+import           System.FilePath ( (</>) )
+import           System.Posix.Signals (installHandler, Handler(Catch), sigINT, sigTERM)
+import           System.Random ( getStdRandom )
 
-import Paths_ads
+import           Paths_ads
 
-import Freenet as FN
-import Freenet.Chk
-import Freenet.Fproxy as FP
-import Freenet.Rijndael as RD
-import Freenet.Ssk
-import Logging as LOG
-import Net
-import Node
-import RestApi
-import Store
-import Types
+import           Freenet as FN
+import           Freenet.Chk
+import           Freenet.Fproxy as FP
+import           Freenet.Rijndael as RD
+import           Freenet.Ssk
+import           Logging as LOG
+import           Net
+import           Node
+import           Peers
+import           RestApi
+import           Store
+import           Types
 
 logI :: String -> IO ()
 logI = infoM "main"
@@ -47,10 +48,8 @@ sigHandler s = do
   infoM "main" "shutdown on sigint/sigterm"
   atomically $ writeTVar s True
   
-  
 mkFileStore :: CFG.Config -> IO (StoreFile ChkBlock, StoreFile SskBlock)
 mkFileStore cfg = do
-    -- datastore
   dsdir       <- CFG.require cfg "datastore.directory"
   createDirectoryIfMissing True dsdir
   
@@ -90,7 +89,7 @@ main = withSocketsDo $ do
   cfg <- CFG.load [CFG.Required $ appDir </> "config"]
   
   -- initialize logging
-  LOG.initLogging $ CFG.subconfig "logging" cfg
+  LOG.initLogging -- $ CFG.subconfig "logging" cfg
 
   -- read (maybe create) identity
   mNodeInfo <- doesFileExist infoFile >>= \e ->

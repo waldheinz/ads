@@ -128,7 +128,8 @@ executable ads-sandbox
     buildable:      False
 
   build-depends:
-    ads, base, conduit, mtl, random, stm-conduit
+    ads, base, conduit, mtl, random, stm, stm-conduit,
+    unordered-containers
 
 test-suite test-ads
   type:
