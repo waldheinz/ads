@@ -46,6 +46,7 @@ library
     Freenet.Rijndael,
     Freenet.SplitFile,
     Freenet.Ssk,
+    Freenet.Store
     Freenet.Types,
     Freenet.URI,
     Logging,
@@ -55,7 +56,6 @@ library
     Peers,
     RestApi,
     Statistics,
-    Store,
     Time,
     Types,
     Utils
@@ -146,7 +146,10 @@ test-suite test-ads
     ads,
     base                       >= 4.0,
     bytestring,
+    HUnit                      >= 1.2,
+    temporary                  >= 1.1,
     test-framework             >= 0.8,
+    test-framework-hunit       >= 0.3,
     test-framework-quickcheck2 >= 0.3,
     QuickCheck                 >= 2.0,
     stm

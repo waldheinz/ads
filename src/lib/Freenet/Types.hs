@@ -82,15 +82,10 @@ mkKey' bs = Key $ mkId' bs
 -- |
 -- A still encrypted, but verified, chunk of data.
 class DataBlock f where
-
+  
   -- |
   -- Use @freenetLocation@ to implement this. Really.
   dataBlockLocation :: f -> Key
-
-  -- |
-  -- Gives the type code for the datablock. This is only needed to determine the
-  -- @dataBlockRoutingLocation@.
---  dataBlockType :: f -> Word16
   
   -- |
   -- Decrypts the data block. Be aware that the resulting data may still
@@ -99,7 +94,7 @@ class DataBlock f where
     :: f      
     -> Key                                -- ^ the secret key
     -> Either T.Text (BS.ByteString, Int) -- ^ either an error or (decrypted payload, original length)
-      
+    
 class DataBlock a => StorePersistable a where
   storeSize :: a -> Int
   storePut  :: a -> Put

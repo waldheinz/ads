@@ -26,12 +26,12 @@ import           Freenet.Chk
 import           Freenet.Fproxy as FP
 import           Freenet.Rijndael as RD
 import           Freenet.Ssk
+import           Freenet.Store
 import           Logging as LOG
 import           Net
 import           Node
 import           Peers
 import           RestApi
-import           Store
 import           Types
 
 logI :: String -> IO ()
@@ -54,10 +54,10 @@ mkFileStore cfg = do
   createDirectoryIfMissing True dsdir
   
   chkCount    <- CFG.require cfg "datastore.chk-count"
-  chkStore    <- mkStoreFile (undefined :: ChkBlock) (dsdir </> "store-chk") chkCount
+  chkStore    <- mkStoreFile (dsdir </> "store-chk") chkCount
 
   sskCount    <- CFG.require cfg "datastore.ssk-count"
-  sskStore    <- mkStoreFile (undefined :: SskBlock) (dsdir </> "store-ssk") sskCount
+  sskStore    <- mkStoreFile (dsdir </> "store-ssk") sskCount
 
   return (chkStore, sskStore)
   
