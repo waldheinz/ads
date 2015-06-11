@@ -76,7 +76,7 @@ library
     conduit              >= 1.0,
     conduit-extra        >= 1.1,
     configurator         >= 0.2,
-    cprng-aes            >= 0.5,
+    cprng-aes            == 0.5.*,
     crypto-pubkey        >= 0.2,
     directory            >= 1.2,
     fec                  >= 0.1,
