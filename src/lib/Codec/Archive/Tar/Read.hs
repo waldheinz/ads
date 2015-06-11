@@ -23,6 +23,8 @@ import Data.Int      (Int64)
 import Numeric       (readOct)
 import Control.Exception (Exception)
 import Data.Typeable (Typeable)
+import Control.Monad
+import Control.Applicative
 
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.ByteString.Lazy.Char8 as BS.Char8
@@ -203,6 +205,13 @@ data Partial e a = Error e | Ok a
 partial :: Partial e a -> Either e a
 partial (Error msg) = Left msg
 partial (Ok x)      = Right x
+
+instance Functor (Partial e) where
+    fmap = liftM
+
+instance Applicative (Partial e) where
+    pure = return
+    (<*>) = ap
 
 instance Monad (Partial e) where
     return        = Ok
