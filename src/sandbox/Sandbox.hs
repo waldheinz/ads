@@ -3,7 +3,7 @@
 
 module Sandbox (
   Sandbox, runSandbox, delay,
-  
+
   -- * Nodes
   randomNode, addPeer
   ) where
@@ -19,8 +19,8 @@ import Node
 import Types
 
 newtype Sandbox a = Sandbox { unSandbox :: RWST Environment () State IO a }
-                  deriving ( Monad, MonadReader Environment, MonadState State, MonadIO )
-                         
+                  deriving ( Applicative, Functor, Monad, MonadReader Environment, MonadState State, MonadIO )
+
 type SandboxNode = Node MsgPassAddress
 
 data Environment = Env
@@ -36,11 +36,11 @@ runSandbox :: Sandbox a -> IO a
 runSandbox s = do
   net <- mkMsgPassNet
   initLogging
-  
+
   let
     env = Env net
     st  = State [] (mkStdGen 23)
-    
+
   fmap fst $ evalRWST (unSandbox s) env st
 
 delay :: Int -> Sandbox ()
@@ -65,4 +65,3 @@ addPeer
 addPeer n1 n2 = liftIO $ atomically $ do
   oid <- readTVar $ nodeIdentity n2
   mergeNodeInfo n1 oid
-
